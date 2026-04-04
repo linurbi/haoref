@@ -18,7 +18,7 @@
 
 $CF_WORKER_URL = "https://misty-pond-cb9d.linurbi.workers.dev"
 $GIST_ID       = if ($env:GIST_ID)    { $env:GIST_ID }    else { "972798220ff080e050a3a4a0d386b3e0" }
-$GITHUB_TOKEN  = if ($env:GIST_TOKEN) { $env:GIST_TOKEN } else { "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" }
+$GITHUB_TOKEN  = if ($env:GIST_TOKEN) { $env:GIST_TOKEN } else { throw "Set GIST_TOKEN env var or env:GIST_TOKEN" }
 $LOG_FILE      = if ($env:GITHUB_ACTIONS) { "./accumulate.log" } else { "$PSScriptRoot\accumulate.log" }
 
 function Log($msg) {
