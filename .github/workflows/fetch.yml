@@ -1,0 +1,25 @@
+name: Fetch & Accumulate OREF Alerts
+
+on:
+  schedule:
+    - cron: '20 * * * *'   # every hour at :20
+  workflow_dispatch:         # allow manual trigger from GitHub UI
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch new alerts from Telegram
+        shell: pwsh
+        env:
+          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+        run: ./parse_telegram.ps1
+
+      - name: Accumulate fresh alerts from OREF API
+        shell: pwsh
+        env:
+          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+        run: ./accumulate.ps1
