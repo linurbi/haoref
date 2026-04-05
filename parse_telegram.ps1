@@ -5,7 +5,7 @@ $CHANNEL      = "PikudHaOref_all"
 $outputFile   = if ($env:GITHUB_ACTIONS) { "./oref_history.json" } else { "c:\Linur\Projects\customers\Haoref\oref_history.json" }
 $GIST_ID      = if ($env:GIST_ID)    { $env:GIST_ID }    else { "972798220ff080e050a3a4a0d386b3e0" }
 $GITHUB_TOKEN = if ($env:GIST_TOKEN) { $env:GIST_TOKEN } else { throw "Set GIST_TOKEN env var or env:GIST_TOKEN" }
-$START_DATE   = [datetime]"2026-02-28"
+$START_DATE   = [datetime]"2026-03-31"   # TEST: change to 2026-02-28 for full backfill
 
 # ── JSON helpers ──────────────────────────────────────────────────────────────
 function Escape-Str([string]$s) {
