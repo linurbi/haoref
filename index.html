@@ -126,9 +126,9 @@
   <!-- KPI cards -->
   <section class="kpi-grid" aria-label="נתוני מפתח">
     <div class="kpi red">
-      <div class="kpi-label">סה"כ אזעקות</div>
+      <div class="kpi-label">סה"כ אירועי אזעקה</div>
       <div class="kpi-value" id="kpiTotal">—</div>
-      <div class="kpi-sub">מתחילת המבצע</div>
+      <div class="kpi-sub" id="kpiCityHits">— פגיעות יישובים</div>
     </div>
     <div class="kpi orange">
       <div class="kpi-label">אזעקות היום</div>
@@ -489,6 +489,10 @@ function processAlerts(raw) {
   const byCategory = {};
   const todayStr   = new Date().toISOString().split("T")[0];
 
+  // Track unique alarm events: same title + same minute = one event
+  const seenAlarmEvents = new Set();
+  const byDayAlarms     = {};
+
   for (const a of raw) {
     const dt   = parseAlertDate(a.alertDate);
     if (!dt) continue;
@@ -498,6 +502,14 @@ function processAlerts(raw) {
     const region = a.region || "";
     const cat    = parseInt(a.category, 10) || 1;
 
+    // Alarm event = unique (title + minute bucket)
+    const minBucket = Math.floor(dt.getTime() / 60000);
+    const eventKey  = `${minBucket}||${a.title || ""}`;
+    if (!seenAlarmEvents.has(eventKey)) {
+      seenAlarmEvents.add(eventKey);
+      byDayAlarms[day] = (byDayAlarms[day] || 0) + 1;
+    }
+
     byDay[day]      = (byDay[day]      || 0) + 1;
     byCategory[cat] = (byCategory[cat] || 0) + 1;
     byHour[hour]   += 1;
@@ -505,23 +517,25 @@ function processAlerts(raw) {
     if (region)                byRegion[region] = (byRegion[region] || 0) + 1;
   }
 
-  const sortedDays  = Object.entries(byDay).sort(([a],[b]) => a.localeCompare(b));
-  const peakDay     = sortedDays.reduce((m, e) => (e[1] > m[1] ? e : m), ["", 0]);
-  const avgPerDay   = sortedDays.length ? Math.round(raw.length / sortedDays.length) : 0;
-  const topAreas    = Object.entries(byArea).sort(([,a],[,b]) => b - a).slice(0, 15);
-  const topRegions  = Object.entries(byRegion).sort(([,a],[,b]) => b - a);
+  const sortedDays     = Object.entries(byDay).sort(([a],[b]) => a.localeCompare(b));
+  const sortedDaysAlarms = Object.entries(byDayAlarms).sort(([a],[b]) => a.localeCompare(b));
+  const peakDay        = sortedDaysAlarms.reduce((m, e) => (e[1] > m[1] ? e : m), ["", 0]);
+  const avgPerDay      = sortedDaysAlarms.length ? Math.round(seenAlarmEvents.size / sortedDaysAlarms.length) : 0;
+  const topAreas       = Object.entries(byArea).sort(([,a],[,b]) => b - a).slice(0, 15);
+  const topRegions     = Object.entries(byRegion).sort(([,a],[,b]) => b - a);
 
   const realAlerts = raw.filter(a => REAL_ATTACK_CATS.has(parseInt(a.category, 10) || 1)).length;
 
   return {
-    total:       raw.length,
+    total:        seenAlarmEvents.size,   // alarm events
+    cityHits:     raw.length,             // city-level records
     realAlerts,
-    today:       byDay[todayStr] || 0,
-    todayDate:   todayStr,
+    today:        byDayAlarms[todayStr] || 0,
+    todayDate:    todayStr,
     peakDay,
     avgPerDay,
-    uniqueAreas: Object.keys(byArea).length,
-    byDay:       sortedDays,
+    uniqueAreas:  Object.keys(byArea).length,
+    byDay:        sortedDaysAlarms,       // chart uses alarm events per day
     byHour,
     topAreas,
     topRegions,
@@ -534,6 +548,7 @@ function processAlerts(raw) {
 // ═══════════════════════════════════════════════
 function updateKPIs(stats) {
   setText("kpiTotal",    stats.total.toLocaleString("he-IL"));
+  setText("kpiCityHits", stats.cityHits.toLocaleString("he-IL") + " פגיעות יישובים");
   setText("kpiToday",    stats.today.toLocaleString("he-IL"));
   setText("kpiTodayDate",formatDate(stats.todayDate));
   setText("kpiPeak",     stats.peakDay[1].toLocaleString("he-IL"));

@@ -31,8 +31,14 @@ try {
         [void]$seen.Add("$($a.alertDate)||$($a.data)")
     }
     $latestDate = ($existing | Sort-Object alertDate -Descending | Select-Object -First 1).alertDate
-    $SINCE = if ($latestDate) { [datetime]$latestDate } else { $START_DATE }
-    Write-Host "Loaded $($existing.Count) existing records from Gist. Latest: $latestDate"
+    # If Gist has fewer than 500 records it's missing historical data — go back to START_DATE
+    if ($existing.Count -lt 500 -or -not $latestDate) {
+        $SINCE = $START_DATE
+        Write-Host "Loaded $($existing.Count) existing records from Gist — too few, backfilling from $START_DATE"
+    } else {
+        $SINCE = [datetime]$latestDate
+        Write-Host "Loaded $($existing.Count) existing records from Gist. Latest: $latestDate"
+    }
 } catch {
     Write-Host "Could not load Gist (starting fresh): $_"
     $SINCE = $START_DATE
