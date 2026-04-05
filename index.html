@@ -476,6 +476,11 @@ function filterFromStart(data) {
 // ═══════════════════════════════════════════════
 // PROCESS DATA
 // ═══════════════════════════════════════════════
+const ADVISORY_RE = /יש לפעול|היכנסו|מרחב מוגן|פיקוד העורף|השוהים|יש להיכנס|בהתאם להנחיות|לפעול בהתאם/;
+function looksLikeCity(s) {
+  return s && s.length <= 50 && !ADVISORY_RE.test(s);
+}
+
 function processAlerts(raw) {
   const byDay      = {};
   const byHour     = Array(24).fill(0);
@@ -489,15 +494,15 @@ function processAlerts(raw) {
     if (!dt) continue;
     const day    = dt.toISOString().split("T")[0];
     const hour   = dt.getUTCHours();
-    const area   = a.data   || a.area   || "לא ידוע";
-    const region = a.region || a.area   || "";
+    const area   = a.data   || "לא ידוע";
+    const region = a.region || "";
     const cat    = parseInt(a.category, 10) || 1;
 
-    byDay[day]       = (byDay[day]       || 0) + 1;
-    byArea[area]     = (byArea[area]     || 0) + 1;
-    byCategory[cat]  = (byCategory[cat]  || 0) + 1;
-    byHour[hour]    += 1;
-    if (region) byRegion[region] = (byRegion[region] || 0) + 1;
+    byDay[day]      = (byDay[day]      || 0) + 1;
+    byCategory[cat] = (byCategory[cat] || 0) + 1;
+    byHour[hour]   += 1;
+    if (looksLikeCity(area))   byArea[area]     = (byArea[area]     || 0) + 1;
+    if (region)                byRegion[region] = (byRegion[region] || 0) + 1;
   }
 
   const sortedDays  = Object.entries(byDay).sort(([a],[b]) => a.localeCompare(b));

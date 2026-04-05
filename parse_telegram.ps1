@@ -118,17 +118,18 @@ while (-not $done) {
 
                 # Skip the alarm header section (contains date like "(8/3/2026)")
                 if ($sectionTitle -match '\d+/\d+/\d+') { continue }
-                # Skip advisory text sections (not a region name)
-                if ($sectionTitle.Length -gt 50) { continue }
+                # Skip advisory/instructional sections — only accept region names (start with אזור)
+                if ($sectionTitle -notmatch '^\u05D0\u05D6\u05D5\u05E8') { continue }
 
                 $citiesHtml = $Matches[2]
                 $citiesHtml = [regex]::Replace($citiesHtml, '\(<strong>[^<]*</strong>\)', '')
                 $citiesHtml = [regex]::Replace($citiesHtml, '<[^>]+>', ' ')
                 $citiesHtml = $citiesHtml.Trim()
 
+                $advisoryRx = "\u05D9\u05E9 \u05DC\u05E4\u05E2\u05D5\u05DC|\u05D4\u05D9\u05DB\u05E0\u05E1\u05D5|\u05DE\u05E8\u05D7\u05D1 \u05DE\u05D5\u05D2\u05DF|\u05E4\u05D9\u05E7\u05D5\u05D3 \u05D4\u05E2\u05D5\u05E8\u05E3|\u05D4\u05E9\u05D5\u05D4\u05D9\u05DD|\u05D1\u05D4\u05EA\u05D0\u05DD \u05DC\u05D4\u05E0\u05D7\u05D9\u05D5\u05EA"
                 $cities = $citiesHtml -split '[,،]' |
                     ForEach-Object { $_.Trim() -replace '[\r\n]+',' ' -replace '\s{2,}',' ' } |
-                    Where-Object { $_.Length -ge 2 -and $_.Length -le 55 }
+                    Where-Object { $_.Length -ge 2 -and $_.Length -le 50 -and $_ -notmatch $advisoryRx }
 
                 if ($cities.Count -eq 0) { continue }
 
