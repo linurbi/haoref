@@ -65,13 +65,25 @@ while (-not $done) {
         Write-Host "ERROR fetching: $_"; break
     }
 
+    Write-Host "    HTML length: $($html.Length) chars"
+
     # Split page into per-message blocks
     $blocks = ($html -split '(?=<div class="tgme_widget_message_wrap)') |
               Where-Object { $_ -match 'data-post=' }
 
+    Write-Host "    Blocks found: $($blocks.Count)"
     if ($blocks.Count -eq 0) { Write-Host "  No message blocks found — stopping."; break }
 
+    # Debug: show first block's datetime and msgType
+    if ($blocks.Count -gt 0) {
+        $sample = $blocks[0]
+        $sdt = [regex]::Match($sample, 'datetime="([^"]+)"').Groups[1].Value
+        $stxt = [regex]::Match($sample, '<div class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]{0,100})').Groups[1].Value
+        Write-Host "    Sample datetime: $sdt | text preview: $($stxt -replace '<[^>]+>','' | Select-Object -First 1)"
+    }
+
     $minId = [int]::MaxValue
+    $pageNew = 0; $pageSkipped = 0
 
     foreach ($block in $blocks) {
         # Message ID
@@ -106,10 +118,10 @@ while (-not $done) {
         $msgType = if ($typeM.Success) { $typeM.Groups[1].Value.Trim() } else { "" }
 
         # Skip pre-alerts (מבזק) and all-clears (עדכון) — not actual alarms
-        if ($msgType -match "\u05DE\u05D1\u05D6\u05E7|\u05E2\u05D3\u05DB\u05D5\u05DF") { continue }
+        if ($msgType -match "\u05DE\u05D1\u05D6\u05E7|\u05E2\u05D3\u05DB\u05D5\u05DF") { $pageSkipped++; continue }
 
         # Skip if we can't identify the type at all
-        if ($msgType.Length -eq 0) { continue }
+        if ($msgType.Length -eq 0) { $pageSkipped++; continue }
 
         # Determine category from the alarm type
         $category = 1
@@ -142,6 +154,7 @@ while (-not $done) {
                 foreach ($city in $cities) {
                     $key = "$alertDate||$city"
                     if ($seen.Add($key)) {
+                        $pageNew++
                         [void]$results.Add([PSCustomObject]@{
                             alertDate = $alertDate
                             title     = $msgType
@@ -155,7 +168,7 @@ while (-not $done) {
         }
     }
 
-    Write-Host "    -> $($results.Count) records so far (min msg ID on page: $minId)"
+    Write-Host "    -> $($results.Count) total records | +$pageNew new | $pageSkipped skipped | min ID: $minId"
 
     if ($done -or $minId -eq [int]::MaxValue) { break }
     $beforeId = $minId
