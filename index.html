@@ -155,6 +155,11 @@
       <div class="kpi-value" id="kpiReal">—</div>
       <div class="kpi-sub">ירי · כטב״מ · בליסטי</div>
     </div>
+    <div class="kpi orange">
+      <div class="kpi-label">מבזקים (התרעה מוקדמת)</div>
+      <div class="kpi-value" id="kpiMevazek">—</div>
+      <div class="kpi-sub">אירועים שלא הפכו לאזעקה</div>
+    </div>
     <div class="kpi cyan">
       <div class="kpi-label">סה"כ יירוטים</div>
       <div class="kpi-value" id="kpiIntercepted">—</div>
@@ -487,11 +492,13 @@ function processAlerts(raw) {
   const byArea     = {};
   const byRegion   = {};
   const byCategory = {};
+  const byTitle    = {};
   const todayStr   = new Date().toISOString().split("T")[0];
 
-  // Track unique alarm events: same title + same minute = one event
-  const seenAlarmEvents = new Set();
-  const byDayAlarms     = {};
+  // Separate pre-alerts (מבזק, cat 4) from actual alarms
+  const seenAlarmEvents   = new Set();   // actual alarms only
+  const seenMevazekEvents = new Set();   // pre-alerts only
+  const byDayAlarms       = {};
 
   for (const a of raw) {
     const dt   = parseAlertDate(a.alertDate);
@@ -501,45 +508,55 @@ function processAlerts(raw) {
     const area   = a.data   || "לא ידוע";
     const region = a.region || "";
     const cat    = parseInt(a.category, 10) || 1;
+    const title  = a.title  || "";
+    const isMevazek = (cat === 4);
 
-    // Alarm event = unique (title + minute bucket)
+    // Unique event = same title + same minute bucket
     const minBucket = Math.floor(dt.getTime() / 60000);
-    const eventKey  = `${minBucket}||${a.title || ""}`;
-    if (!seenAlarmEvents.has(eventKey)) {
-      seenAlarmEvents.add(eventKey);
-      byDayAlarms[day] = (byDayAlarms[day] || 0) + 1;
+    const eventKey  = `${minBucket}||${title}`;
+
+    if (isMevazek) {
+      seenMevazekEvents.add(eventKey);
+    } else {
+      if (!seenAlarmEvents.has(eventKey)) {
+        seenAlarmEvents.add(eventKey);
+        byDayAlarms[day] = (byDayAlarms[day] || 0) + 1;
+      }
     }
 
-    byDay[day]      = (byDay[day]      || 0) + 1;
-    byCategory[cat] = (byCategory[cat] || 0) + 1;
-    byHour[hour]   += 1;
-    if (looksLikeCity(area))   byArea[area]     = (byArea[area]     || 0) + 1;
-    if (region)                byRegion[region] = (byRegion[region] || 0) + 1;
+    if (!isMevazek) {
+      byDay[day]      = (byDay[day]      || 0) + 1;
+      byHour[hour]   += 1;
+      byCategory[cat] = (byCategory[cat] || 0) + 1;
+      byTitle[title]  = (byTitle[title]  || 0) + 1;
+      if (looksLikeCity(area))   byArea[area]     = (byArea[area]     || 0) + 1;
+      if (region)                byRegion[region] = (byRegion[region] || 0) + 1;
+    }
   }
 
-  const sortedDays     = Object.entries(byDay).sort(([a],[b]) => a.localeCompare(b));
   const sortedDaysAlarms = Object.entries(byDayAlarms).sort(([a],[b]) => a.localeCompare(b));
   const peakDay        = sortedDaysAlarms.reduce((m, e) => (e[1] > m[1] ? e : m), ["", 0]);
   const avgPerDay      = sortedDaysAlarms.length ? Math.round(seenAlarmEvents.size / sortedDaysAlarms.length) : 0;
   const topAreas       = Object.entries(byArea).sort(([,a],[,b]) => b - a).slice(0, 15);
   const topRegions     = Object.entries(byRegion).sort(([,a],[,b]) => b - a);
-
-  const realAlerts = raw.filter(a => REAL_ATTACK_CATS.has(parseInt(a.category, 10) || 1)).length;
+  const realAlerts     = raw.filter(a => REAL_ATTACK_CATS.has(parseInt(a.category, 10) || 1)).length;
 
   return {
-    total:        seenAlarmEvents.size,   // alarm events
-    cityHits:     raw.length,             // city-level records
+    total:        seenAlarmEvents.size,
+    cityHits:     raw.filter(a => (parseInt(a.category,10)||1) !== 4).length,
+    mevazek:      seenMevazekEvents.size,
     realAlerts,
     today:        byDayAlarms[todayStr] || 0,
     todayDate:    todayStr,
     peakDay,
     avgPerDay,
     uniqueAreas:  Object.keys(byArea).length,
-    byDay:        sortedDaysAlarms,       // chart uses alarm events per day
+    byDay:        sortedDaysAlarms,
     byHour,
     topAreas,
     topRegions,
     byCategory,
+    byTitle,
   };
 }
 
@@ -556,7 +573,8 @@ function updateKPIs(stats) {
   setText("kpiAreas",    stats.uniqueAreas.toLocaleString("he-IL"));
   setText("kpiAvg",      stats.avgPerDay.toLocaleString("he-IL"));
 
-  setText("kpiReal", stats.realAlerts.toLocaleString("he-IL"));
+  setText("kpiReal",    stats.realAlerts.toLocaleString("he-IL"));
+  setText("kpiMevazek", stats.mevazek.toLocaleString("he-IL"));
 
   const totalFired       = WEAPONS_DATA.totals.reduce((a, b) => a + b, 0);
   const totalIntercepted = WEAPONS_DATA.intercepted.reduce((a, b) => a + b, 0);
@@ -940,7 +958,7 @@ function showConnectionError() {
   hideBanner("bannerProxy");
   // Reset dynamic KPIs to dashes so nothing misleading is shown
   ["kpiTotal","kpiToday","kpiTodayDate","kpiPeak","kpiPeakDate",
-   "kpiAreas","kpiAvg","kpiReal"].forEach(id => setText(id, "—"));
+   "kpiAreas","kpiAvg","kpiReal","kpiMevazek"].forEach(id => setText(id, "—"));
 }
 
 async function refresh() {

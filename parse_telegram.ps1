@@ -117,8 +117,8 @@ while (-not $done) {
         $typeM = [regex]::Match($rawHtml, '<strong>([^\d<(]+?)\s*\(\d+/\d+/\d+\)')
         $msgType = if ($typeM.Success) { $typeM.Groups[1].Value.Trim() } else { "" }
 
-        # Skip pre-alerts (מבזק) and all-clears (עדכון) — not actual alarms
-        if ($msgType -match "\u05DE\u05D1\u05D6\u05E7|\u05E2\u05D3\u05DB\u05D5\u05DF") { $pageSkipped++; continue }
+        # Skip only all-clears (עדכון) — pre-alerts (מבזק) are stored with category 4
+        if ($msgType -match "\u05E2\u05D3\u05DB\u05D5\u05DF") { $pageSkipped++; continue }
 
         # Skip if we can't identify the type at all
         if ($msgType.Length -eq 0) { $pageSkipped++; continue }
@@ -145,8 +145,11 @@ while (-not $done) {
             $isRegion  = $sectionTitle -match '^\u05D0\u05D6\u05D5\u05E8'
             $recTitle  = if ($isRegion) { $msgType } else { $sectionTitle }
             $recRegion = if ($isRegion) { $sectionTitle } else { "" }
-            $recCat    = 1
-            if ($recTitle -match "\u05DB\u05D8\u05D1|\u05DB\u05D8\u05B7\u05D1\u05B4") { $recCat = 3 }
+            # Categories: 1=rockets, 2=UAV (כלי טיס עוין), 3=ballistic (כטב"מ), 4=pre-alert (מבזק)
+            $recCat = 1
+            if     ($recTitle -match "\u05DE\u05D1\u05D6\u05E7")                           { $recCat = 4 }
+            elseif ($recTitle -match "\u05DB\u05D8\u05D1")                                  { $recCat = 3 }
+            elseif ($recTitle -match "\u05DB\u05DC\u05D9 \u05D8\u05D9\u05E1 \u05E2\u05D5\u05D9\u05DF") { $recCat = 2 }
 
             $citiesHtml = $m.Groups[2].Value
             # Treat <br> between time-groups as a city separator
