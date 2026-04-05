@@ -20,6 +20,7 @@ jobs:
 
       - name: Accumulate fresh alerts from OREF API
         shell: pwsh
+        continue-on-error: true
         env:
           GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
         run: ./accumulate.ps1

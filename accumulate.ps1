@@ -54,10 +54,11 @@ Log "--- OREF accumulator starting ---"
 $fromDate = (Get-Date).AddDays(-2).ToString("dd.MM.yyyy")
 try {
     $fresh = Invoke-RestMethod -Uri "$CF_WORKER_URL`?fromDate=$fromDate" -UseBasicParsing -TimeoutSec 60
+    if (-not $fresh -or $fresh.Count -eq 0) { Log "CF Worker returned 0 records — nothing to do."; exit 0 }
     Log "Cloudflare Worker returned $($fresh.Count) records (since $fromDate)"
 } catch {
-    Log "ERROR fetching from Cloudflare Worker: $_"
-    exit 1
+    Log "WARNING: CF Worker blocked or unavailable ($fromDate) — skipping this run: $_"
+    exit 0
 }
 
 # ── Step 2: load existing Gist content (two-part files) ───────────────────────
