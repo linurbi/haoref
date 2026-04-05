@@ -53,9 +53,11 @@ async function handleRequest(request) {
   // ── Strategy 0: GitHub Gist — only used when no fromDate filter is requested ─
   if (GIST_ID && GIST_OWNER && !fromDateParam) {
     try {
+      var cacheBust = "?t=" + Date.now();
       var base = "https://gist.githubusercontent.com/" + GIST_OWNER + "/" + GIST_ID + "/raw/";
-      var r1 = await fetch(base + "oref_history_1.json");
-      var r2 = await fetch(base + "oref_history_2.json");
+      var fetchOpts = { cf: { cacheEverything: false }, cache: "no-store" };
+      var r1 = await fetch(base + "oref_history_1.json" + cacheBust, fetchOpts);
+      var r2 = await fetch(base + "oref_history_2.json" + cacheBust, fetchOpts);
       var d1 = JSON.parse(await r1.text());
       var d2 = JSON.parse(await r2.text());
       var combined = d1.concat(d2);
