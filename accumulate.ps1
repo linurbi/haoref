@@ -50,10 +50,11 @@ function Upload-GistFile([string]$filename, [string]$content) {
 
 Log "--- OREF accumulator starting ---"
 
-# ── Step 1: fetch fresh alerts from the Cloudflare Worker ─────────────────────
+# ── Step 1: fetch only recent alerts from the Cloudflare Worker ───────────────
+$fromDate = (Get-Date).AddDays(-2).ToString("dd.MM.yyyy")
 try {
-    $fresh = Invoke-RestMethod -Uri $CF_WORKER_URL -UseBasicParsing -TimeoutSec 60
-    Log "Cloudflare Worker returned $($fresh.Count) records"
+    $fresh = Invoke-RestMethod -Uri "$CF_WORKER_URL`?fromDate=$fromDate" -UseBasicParsing -TimeoutSec 60
+    Log "Cloudflare Worker returned $($fresh.Count) records (since $fromDate)"
 } catch {
     Log "ERROR fetching from Cloudflare Worker: $_"
     exit 1

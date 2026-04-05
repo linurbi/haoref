@@ -45,10 +45,13 @@ async function handleRequest(request) {
     });
   }
 
+  var url          = new URL(request.url);
+  var fromDateParam = url.searchParams.get("fromDate"); // e.g. "02.04.2026" (DD.MM.YYYY)
+
   var errors = [];
 
-  // ── Strategy 0: GitHub Gist — two-part full operation history ──────────────
-  if (GIST_ID && GIST_OWNER) {
+  // ── Strategy 0: GitHub Gist — only used when no fromDate filter is requested ─
+  if (GIST_ID && GIST_OWNER && !fromDateParam) {
     try {
       var base = "https://gist.githubusercontent.com/" + GIST_OWNER + "/" + GIST_ID + "/raw/";
       var r1 = await fetch(base + "oref_history_1.json");
@@ -65,14 +68,14 @@ async function handleRequest(request) {
     } catch (e) { errors.push("gist: " + e.message); }
   }
 
-  // ── Strategy 1: AlertsHistory with date range (full operation history) ──────
+  // ── Strategy 1: AlertsHistory with date range ─────────────────────────────
   try {
     var today   = new Date();
     var dd      = String(today.getDate()).padStart(2, "0");
     var mm      = String(today.getMonth() + 1).padStart(2, "0");
     var yyyy    = today.getFullYear();
     var toDate  = dd + "." + mm + "." + yyyy;
-    var fromDate = "28.02.2026"; // Start of Operation Roar of the Lion
+    var fromDate = fromDateParam || "28.02.2026"; // caller can override start date
 
     var rangeUrl = "https://www.oref.org.il/warningMessages/alert/History/AlertsHistory.json" +
                    "?fromDate=" + fromDate + "&toDate=" + toDate;
