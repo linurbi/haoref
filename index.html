@@ -238,10 +238,14 @@ const START_DATE   = new Date("2026-02-28T00:00:00");
 const UPDATE_EVERY = 3600; // seconds
 const OREF_URL     = "https://www.oref.org.il/warningMessages/alert/History/AlertsHistory.json";
 
-// ── Set your Cloudflare Worker URL here after deploying cloudflare-worker.js ──
-// Example: "https://oref-proxy.your-name.workers.dev"
-// See cloudflare-worker.js in this folder for instructions.
 const CF_WORKER_URL = "https://misty-pond-cb9d.linurbi.workers.dev";
+
+// ── GitHub Gist — primary historical data source ──────────────────────────
+const GIST_OWNER = "linurbi";
+const GIST_ID    = "972798220ff080e050a3a4a0d386b3e0";
+function gistRaw(file) {
+  return `https://gist.githubusercontent.com/${GIST_OWNER}/${GIST_ID}/raw/${file}?t=${Date.now()}`;
+}
 
 // ── localStorage accumulation ─────────────────────────────────────────────
 // OREF only returns a rolling window (~last few hours). We merge every fresh
@@ -374,7 +378,24 @@ async function parseProxyResponse(resp, proxyHost) {
 }
 
 async function fetchAlerts() {
-  // -1 – Cloudflare Worker (highest priority — different IPs, bypasses Akamai block)
+  // -1a – Direct Gist fetch (highest priority — guaranteed to have Telegram history)
+  try {
+    const [r1, r2] = await Promise.all([
+      fetchWithTimeout(gistRaw("oref_history_1.json"), { cache: "no-store" }),
+      fetchWithTimeout(gistRaw("oref_history_2.json"), { cache: "no-store" }),
+    ]);
+    const [d1, d2] = await Promise.all([r1.json(), r2.json()]);
+    const combined = [...(Array.isArray(d1) ? d1 : []), ...(Array.isArray(d2) ? d2 : [])];
+    if (combined.length > 0) {
+      console.log(`[OREF] Gist OK — ${combined.length} records`);
+      setSourceBadge("live", "● LIVE · Telegram history");
+      hideBanner("bannerError");
+      hideBanner("bannerProxy");
+      return filterFromStart(combined);
+    }
+  } catch (e) { console.warn("[OREF] Gist failed:", e.message); }
+
+  // -1b – Cloudflare Worker (fallback, also tries OREF API)
   if (CF_WORKER_URL) {
     try {
       const resp = await fetchWithTimeout(CF_WORKER_URL, { cache: "no-cache" });
