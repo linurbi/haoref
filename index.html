@@ -141,7 +141,7 @@
       <div class="kpi-sub" id="kpiPeakDate">—</div>
     </div>
     <div class="kpi cyan">
-      <div class="kpi-label">אזורים מוכו</div>
+      <div class="kpi-label">יישובים שהותקפו</div>
       <div class="kpi-value" id="kpiAreas">—</div>
       <div class="kpi-sub">אזורים ייחודיים</div>
     </div>
@@ -179,17 +179,21 @@
     </div>
   </div>
 
-  <!-- Row 2: Top areas + Threat types -->
+  <!-- Row 2: Top areas + Threat types + Region distribution -->
   <div class="charts-grid three">
     <div class="chart-card">
-      <div class="card-title"><div class="dot" aria-hidden="true"></div>אזורים מותקפים ביותר — Top 15</div>
-      <div class="chart-wrap tall"><canvas id="chartAreas" aria-label="גרף אזורים מותקפים ביותר"></canvas></div>
+      <div class="card-title"><div class="dot" aria-hidden="true"></div>יישובים מותקפים ביותר — Top 15</div>
+      <div class="chart-wrap tall"><canvas id="chartAreas" aria-label="גרף יישובים מותקפים ביותר"></canvas></div>
     </div>
     <div class="chart-card">
       <div class="card-title"><div class="dot" aria-hidden="true"></div>סוגי איומים</div>
       <div class="chart-wrap scroll">
         <div class="threat-grid" id="threatGrid" role="list" aria-label="סוגי איומים"></div>
       </div>
+    </div>
+    <div class="chart-card">
+      <div class="card-title"><div class="dot" aria-hidden="true"></div>התפלגות לפי אזור</div>
+      <div class="chart-wrap tall"><canvas id="chartRegions" aria-label="גרף התפלגות לפי אזור"></canvas></div>
     </div>
   </div>
 
@@ -445,13 +449,18 @@ async function fetchAlerts() {
 // Robust date parser — handles ISO and DD/MM/YYYY HH:MM:SS formats
 function parseAlertDate(str) {
   if (!str) return null;
-  // ISO / standard — try first
+  // "YYYY-MM-DD HH:MM:SS" — our stored UTC format: add Z so browser treats it as UTC
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(str)) {
+    const d = new Date(str.replace(" ", "T") + "Z");
+    if (!isNaN(d)) return d;
+  }
+  // ISO with T — try as-is
   let d = new Date(str);
   if (!isNaN(d)) return d;
   // DD/MM/YYYY [HH:MM:SS]
   const m = str.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})(?:\s+(\d{1,2}:\d{2}(?::\d{2})?))?/);
   if (m) {
-    d = new Date(`${m[3]}-${m[2].padStart(2,"0")}-${m[1].padStart(2,"0")}${m[4] ? "T"+m[4] : ""}`);
+    d = new Date(`${m[3]}-${m[2].padStart(2,"0")}-${m[1].padStart(2,"0")}${m[4] ? "T"+m[4]+"Z" : "Z"}`);
     if (!isNaN(d)) return d;
   }
   return null;
@@ -471,27 +480,31 @@ function processAlerts(raw) {
   const byDay      = {};
   const byHour     = Array(24).fill(0);
   const byArea     = {};
+  const byRegion   = {};
   const byCategory = {};
   const todayStr   = new Date().toISOString().split("T")[0];
 
   for (const a of raw) {
     const dt   = parseAlertDate(a.alertDate);
     if (!dt) continue;
-    const day  = dt.toISOString().split("T")[0];
-    const hour = dt.getHours();
-    const area = a.data || a.area || "לא ידוע";
-    const cat  = parseInt(a.category, 10) || 1;
+    const day    = dt.toISOString().split("T")[0];
+    const hour   = dt.getUTCHours();
+    const area   = a.data   || a.area   || "לא ידוע";
+    const region = a.region || a.area   || "";
+    const cat    = parseInt(a.category, 10) || 1;
 
     byDay[day]       = (byDay[day]       || 0) + 1;
     byArea[area]     = (byArea[area]     || 0) + 1;
     byCategory[cat]  = (byCategory[cat]  || 0) + 1;
     byHour[hour]    += 1;
+    if (region) byRegion[region] = (byRegion[region] || 0) + 1;
   }
 
-  const sortedDays = Object.entries(byDay).sort(([a],[b]) => a.localeCompare(b));
-  const peakDay    = sortedDays.reduce((m, e) => (e[1] > m[1] ? e : m), ["", 0]);
-  const avgPerDay  = sortedDays.length ? Math.round(raw.length / sortedDays.length) : 0;
-  const topAreas   = Object.entries(byArea).sort(([,a],[,b]) => b - a).slice(0, 15);
+  const sortedDays  = Object.entries(byDay).sort(([a],[b]) => a.localeCompare(b));
+  const peakDay     = sortedDays.reduce((m, e) => (e[1] > m[1] ? e : m), ["", 0]);
+  const avgPerDay   = sortedDays.length ? Math.round(raw.length / sortedDays.length) : 0;
+  const topAreas    = Object.entries(byArea).sort(([,a],[,b]) => b - a).slice(0, 15);
+  const topRegions  = Object.entries(byRegion).sort(([,a],[,b]) => b - a);
 
   const realAlerts = raw.filter(a => REAL_ATTACK_CATS.has(parseInt(a.category, 10) || 1)).length;
 
@@ -506,6 +519,7 @@ function processAlerts(raw) {
     byDay:       sortedDays,
     byHour,
     topAreas,
+    topRegions,
     byCategory,
   };
 }
@@ -614,6 +628,34 @@ function drawHourly(byHour) {
         label: (i) => ` ${i.raw.toLocaleString("he-IL")} אזעקות`,
       }}},
       scales: { x: axisX(), y: axisY() },
+    },
+  });
+}
+
+// ── Region distribution horizontal bar ──
+function drawRegions(topRegions) {
+  if (!topRegions || topRegions.length === 0) return;
+  buildOrUpdate("chartRegions", {
+    type: "bar",
+    data: {
+      labels: topRegions.map(([r]) => r.replace(/^אזור\s+/, "")),
+      datasets: [{
+        data: topRegions.map(([, v]) => v),
+        backgroundColor: topRegions.map((_, i) =>
+          `hsla(${200 + (i / topRegions.length) * 120}, 70%, 55%, 0.75)`),
+        borderRadius: 4,
+      }],
+    },
+    options: {
+      indexAxis: "y",
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: {
+        label: (i) => ` ${i.raw.toLocaleString("he-IL")} אזעקות`,
+      }}},
+      scales: {
+        x: axisY(),
+        y: axisX({ ticks: { font: { size: 11 } } }),
+      },
     },
   });
 }
@@ -864,6 +906,7 @@ function applyFilter() {
   drawDaily(stats.byDay);
   drawHourly(stats.byHour);
   drawAreas(stats.topAreas);
+  drawRegions(stats.topRegions);
   drawThreats(stats.byCategory);
   drawWeapons();
   drawCasualties();

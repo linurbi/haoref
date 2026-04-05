@@ -12,7 +12,7 @@ function Escape-Str([string]$s) {
     return $s.Replace('\','\\').Replace('"','\"')
 }
 function Rec([PSCustomObject]$r) {
-    return '{"alertDate":"' + (Escape-Str $r.alertDate) + '","title":"' + (Escape-Str $r.title) + '","data":"' + (Escape-Str $r.data) + '","category":' + [string]$r.category + '}'
+    return '{"alertDate":"' + (Escape-Str $r.alertDate) + '","title":"' + (Escape-Str $r.title) + '","data":"' + (Escape-Str $r.data) + '","region":"' + (Escape-Str $r.region) + '","category":' + [string]$r.category + '}'
 }
 function Strip-Html($s) { [regex]::Replace($s,'<[^>]+>',' ').Trim() -replace '\s+',' ' }
 
@@ -53,7 +53,8 @@ while (-not $done) {
     try {
         $resp = Invoke-WebRequest $url -UseBasicParsing -TimeoutSec 30 `
                     -Headers @{ 'User-Agent' = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-        $html = $resp.Content
+        # Force UTF-8 decoding to avoid ??? for Hebrew characters
+        $html = [System.Text.Encoding]::UTF8.GetString($resp.RawContentBytes)
     } catch {
         Write-Host "ERROR fetching: $_"; break
     }
@@ -94,12 +95,32 @@ while (-not $done) {
 
         $alertDate = $msgDate.ToString("yyyy-MM-dd HH:mm:ss")
 
-        # Parse alert sections (same logic as before)
+        # ── Detect message type from header (e.g. "ירי רקטות וטילים (8/3/2026) 6:22") ──
+        $typeM = [regex]::Match($rawHtml, '<strong>([^\d<(]+?)\s*\(\d+/\d+/\d+\)')
+        $msgType = if ($typeM.Success) { $typeM.Groups[1].Value.Trim() } else { "" }
+
+        # Skip pre-alerts (מבזק) and all-clears (עדכון) — not actual alarms
+        if ($msgType -match "\u05DE\u05D1\u05D6\u05E7|\u05E2\u05D3\u05DB\u05D5\u05DF") { continue }
+
+        # Skip if we can't identify the type at all
+        if ($msgType.Length -eq 0) { continue }
+
+        # Determine category from the alarm type
+        $category = 1
+        if ($msgType -match "\u05DB\u05D8\u05D1|\u05DB\u05D8\u05B7\u05D1\u05B4") { $category = 3 }
+
+        # ── Parse per-region sections ─────────────────────────────────────────
         $sections = $rawHtml -split '<br><br>'
         foreach ($sec in $sections) {
             $sec = $sec.Trim()
             if ($sec -match '<strong>(.*?)</strong><br>(.+)') {
-                $alertType  = Strip-Html $Matches[1]
+                $sectionTitle = Strip-Html $Matches[1]
+
+                # Skip the alarm header section (contains date like "(8/3/2026)")
+                if ($sectionTitle -match '\d+/\d+/\d+') { continue }
+                # Skip advisory text sections (not a region name)
+                if ($sectionTitle.Length -gt 50) { continue }
+
                 $citiesHtml = $Matches[2]
                 $citiesHtml = [regex]::Replace($citiesHtml, '\(<strong>[^<]*</strong>\)', '')
                 $citiesHtml = [regex]::Replace($citiesHtml, '<[^>]+>', ' ')
@@ -111,16 +132,14 @@ while (-not $done) {
 
                 if ($cities.Count -eq 0) { continue }
 
-                $category = 1
-                if ($alertType -match "\u05DB\u05D8\u05D1|\u05DB\u05D8\u05B7\u05D1\u05B4") { $category = 3 }
-
                 foreach ($city in $cities) {
                     $key = "$alertDate||$city"
                     if ($seen.Add($key)) {
                         [void]$results.Add([PSCustomObject]@{
                             alertDate = $alertDate
-                            title     = $alertType
+                            title     = $msgType
                             data      = $city
+                            region    = $sectionTitle
                             category  = $category
                         })
                     }
