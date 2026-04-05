@@ -125,60 +125,55 @@ while (-not $done) {
 
         $advisoryRx = "\u05D9\u05E9 \u05DC\u05E4\u05E2\u05D5\u05DC|\u05D4\u05D9\u05DB\u05E0\u05E1\u05D5|\u05DE\u05E8\u05D7\u05D1 \u05DE\u05D5\u05D2\u05DF|\u05E4\u05D9\u05E7\u05D5\u05D3 \u05D4\u05E2\u05D5\u05E8\u05E3|\u05D4\u05E9\u05D5\u05D4\u05D9\u05DD|\u05D1\u05D4\u05EA\u05D0\u05DD \u05DC\u05D4\u05E0\u05D7\u05D9\u05D5\u05EA"
 
-        # ── TEMP DIAGNOSTIC (remove after one successful run) ─────────────────
-        if ($pageNum -le 2 -and $results.Count -eq 0) {
-            $esc = $rawHtml -replace '\r?\n', '↵'
-            Write-Host "  [RAW] msgType=[$msgType] len=$($rawHtml.Length)"
-            Write-Host "  [RAW] $($esc.Substring(0, [Math]::Min(800, $esc.Length)))"
-        }
+        # ── Parse sections: find every <strong>TITLE</strong><br>CITIES block ─
+        # Global scan — no split needed. Content ends at next <br><br> or end.
+        $sectionRx = [System.Text.RegularExpressions.Regex]::new(
+            '<strong>([^<]+)</strong><br>((?:(?!<br><br>).)*)',
+            [System.Text.RegularExpressions.RegexOptions]::Singleline
+        )
+        foreach ($m in $sectionRx.Matches($rawHtml)) {
+            $sectionTitle = Strip-Html $m.Groups[1].Value.Trim()
 
-        # ── Parse per-region/type sections ────────────────────────────────────
-        # Split on any double-<br> (with optional whitespace between them)
-        $sections = [regex]::Split($rawHtml, '<br\s*/?>\s*<br\s*/?>')
-        foreach ($sec in $sections) {
-            $sec = $sec.Trim()
-            # Use [\s\S]+ so cities that appear on a new line are captured too
-            if ($sec -match '(?s)<strong>(.*?)</strong>\s*<br\s*/?>\s*([\s\S]+)') {
-                $sectionTitle = Strip-Html $Matches[1]
+            # Skip alarm-type headers (they contain a date like "(5/4/2026)")
+            if ($sectionTitle -match '\d+/\d+/\d+') { continue }
 
-                # Skip header sections (contain a date like "(8/3/2026)")
-                if ($sectionTitle -match '\d+/\d+/\d+') { continue }
+            # Skip advisory/instructional text sections
+            if ($sectionTitle -match $advisoryRx) { continue }
 
-                # Skip advisory/instructional text sections
-                if ($sectionTitle -match $advisoryRx) { continue }
+            # Individual alarm → section title is a region ("אזור X"), use $msgType as alarm title
+            # Summary message  → section title is the alarm type, leave region blank
+            $isRegion  = $sectionTitle -match '^\u05D0\u05D6\u05D5\u05E8'
+            $recTitle  = if ($isRegion) { $msgType } else { $sectionTitle }
+            $recRegion = if ($isRegion) { $sectionTitle } else { "" }
+            $recCat    = 1
+            if ($recTitle -match "\u05DB\u05D8\u05D1|\u05DB\u05D8\u05B7\u05D1\u05B4") { $recCat = 3 }
 
-                # Individual alarm → section is a region ("אזור X"), use $msgType as title
-                # Summary message  → section is an alarm type ("ירי רקטות וטילים"), use it as title
-                $isRegion  = $sectionTitle -match '^\u05D0\u05D6\u05D5\u05E8'
-                $recTitle  = if ($isRegion) { $msgType } else { $sectionTitle }
-                $recRegion = if ($isRegion) { $sectionTitle } else { "" }
-                $recCat    = 1
-                if ($recTitle -match "\u05DB\u05D8\u05D1|\u05DB\u05D8\u05B7\u05D1\u05B4") { $recCat = 3 }
+            $citiesHtml = $m.Groups[2].Value
+            # Treat <br> between time-groups as a city separator
+            $citiesHtml = $citiesHtml -replace '<br>', ','
+            # Strip time annotations like (<strong>30 שניות</strong>)
+            $citiesHtml = [regex]::Replace($citiesHtml, '\(<strong>[^<]*</strong>\)', '')
+            # Strip remaining HTML tags
+            $citiesHtml = [regex]::Replace($citiesHtml, '<[^>]+>', ' ')
+            $citiesHtml = ($citiesHtml -replace '[\r\n\t]+',' ').Trim()
 
-                $citiesHtml = $Matches[2]
-                # Strip time-in-parens like (דקה וחצי), inline tags, then collapse whitespace
-                $citiesHtml = [regex]::Replace($citiesHtml, '\(<strong>[^<]*</strong>\)', '')
-                $citiesHtml = [regex]::Replace($citiesHtml, '<[^>]+>', ' ')
-                $citiesHtml = ($citiesHtml -replace '[\r\n\t]+',' ').Trim()
+            $cities = $citiesHtml -split '[,،]' |
+                ForEach-Object { $_.Trim() -replace '\s{2,}',' ' } |
+                Where-Object { $_.Length -ge 2 -and $_.Length -le 50 -and $_ -notmatch $advisoryRx }
 
-                $cities = $citiesHtml -split '[,،]' |
-                    ForEach-Object { $_.Trim() -replace '[\r\n]+',' ' -replace '\s{2,}',' ' } |
-                    Where-Object { $_.Length -ge 2 -and $_.Length -le 50 -and $_ -notmatch $advisoryRx }
+            if ($cities.Count -eq 0) { continue }
 
-                if ($cities.Count -eq 0) { continue }
-
-                foreach ($city in $cities) {
-                    $key = "$alertDate||$city"
-                    if ($seen.Add($key)) {
-                        $pageNew++
-                        [void]$results.Add([PSCustomObject]@{
-                            alertDate = $alertDate
-                            title     = $recTitle
-                            data      = $city
-                            region    = $recRegion
-                            category  = $recCat
-                        })
-                    }
+            foreach ($city in $cities) {
+                $key = "$alertDate||$city"
+                if ($seen.Add($key)) {
+                    $pageNew++
+                    [void]$results.Add([PSCustomObject]@{
+                        alertDate = $alertDate
+                        title     = $recTitle
+                        data      = $city
+                        region    = $recRegion
+                        category  = $recCat
+                    })
                 }
             }
         }
