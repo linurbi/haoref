@@ -123,28 +123,34 @@ while (-not $done) {
         # Skip if we can't identify the type at all
         if ($msgType.Length -eq 0) { $pageSkipped++; continue }
 
-        # Determine category from the alarm type
-        $category = 1
-        if ($msgType -match "\u05DB\u05D8\u05D1|\u05DB\u05D8\u05B7\u05D1\u05B4") { $category = 3 }
+        $advisoryRx = "\u05D9\u05E9 \u05DC\u05E4\u05E2\u05D5\u05DC|\u05D4\u05D9\u05DB\u05E0\u05E1\u05D5|\u05DE\u05E8\u05D7\u05D1 \u05DE\u05D5\u05D2\u05DF|\u05E4\u05D9\u05E7\u05D5\u05D3 \u05D4\u05E2\u05D5\u05E8\u05E3|\u05D4\u05E9\u05D5\u05D4\u05D9\u05DD|\u05D1\u05D4\u05EA\u05D0\u05DD \u05DC\u05D4\u05E0\u05D7\u05D9\u05D5\u05EA"
 
-        # ── Parse per-region sections ─────────────────────────────────────────
+        # ── Parse per-region/type sections ────────────────────────────────────
         $sections = $rawHtml -split '<br><br>'
         foreach ($sec in $sections) {
             $sec = $sec.Trim()
             if ($sec -match '<strong>(.*?)</strong><br>(.+)') {
                 $sectionTitle = Strip-Html $Matches[1]
 
-                # Skip the alarm header section (contains date like "(8/3/2026)")
+                # Skip header sections (contain a date like "(8/3/2026)")
                 if ($sectionTitle -match '\d+/\d+/\d+') { continue }
-                # Skip advisory/instructional sections — only accept region names (start with אזור)
-                if ($sectionTitle -notmatch '^\u05D0\u05D6\u05D5\u05E8') { continue }
+
+                # Skip advisory/instructional text sections
+                if ($sectionTitle -match $advisoryRx) { continue }
+
+                # Individual alarm → section is a region ("אזור X"), use $msgType as title
+                # Summary message  → section is an alarm type ("ירי רקטות וטילים"), use it as title
+                $isRegion  = $sectionTitle -match '^\u05D0\u05D6\u05D5\u05E8'
+                $recTitle  = if ($isRegion) { $msgType } else { $sectionTitle }
+                $recRegion = if ($isRegion) { $sectionTitle } else { "" }
+                $recCat    = 1
+                if ($recTitle -match "\u05DB\u05D8\u05D1|\u05DB\u05D8\u05B7\u05D1\u05B4") { $recCat = 3 }
 
                 $citiesHtml = $Matches[2]
                 $citiesHtml = [regex]::Replace($citiesHtml, '\(<strong>[^<]*</strong>\)', '')
                 $citiesHtml = [regex]::Replace($citiesHtml, '<[^>]+>', ' ')
                 $citiesHtml = $citiesHtml.Trim()
 
-                $advisoryRx = "\u05D9\u05E9 \u05DC\u05E4\u05E2\u05D5\u05DC|\u05D4\u05D9\u05DB\u05E0\u05E1\u05D5|\u05DE\u05E8\u05D7\u05D1 \u05DE\u05D5\u05D2\u05DF|\u05E4\u05D9\u05E7\u05D5\u05D3 \u05D4\u05E2\u05D5\u05E8\u05E3|\u05D4\u05E9\u05D5\u05D4\u05D9\u05DD|\u05D1\u05D4\u05EA\u05D0\u05DD \u05DC\u05D4\u05E0\u05D7\u05D9\u05D5\u05EA"
                 $cities = $citiesHtml -split '[,،]' |
                     ForEach-Object { $_.Trim() -replace '[\r\n]+',' ' -replace '\s{2,}',' ' } |
                     Where-Object { $_.Length -ge 2 -and $_.Length -le 50 -and $_ -notmatch $advisoryRx }
@@ -157,10 +163,10 @@ while (-not $done) {
                         $pageNew++
                         [void]$results.Add([PSCustomObject]@{
                             alertDate = $alertDate
-                            title     = $msgType
+                            title     = $recTitle
                             data      = $city
-                            region    = $sectionTitle
-                            category  = $category
+                            region    = $recRegion
+                            category  = $recCat
                         })
                     }
                 }
