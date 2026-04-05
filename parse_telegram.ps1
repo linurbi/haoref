@@ -125,6 +125,13 @@ while (-not $done) {
 
         $advisoryRx = "\u05D9\u05E9 \u05DC\u05E4\u05E2\u05D5\u05DC|\u05D4\u05D9\u05DB\u05E0\u05E1\u05D5|\u05DE\u05E8\u05D7\u05D1 \u05DE\u05D5\u05D2\u05DF|\u05E4\u05D9\u05E7\u05D5\u05D3 \u05D4\u05E2\u05D5\u05E8\u05E3|\u05D4\u05E9\u05D5\u05D4\u05D9\u05DD|\u05D1\u05D4\u05EA\u05D0\u05DD \u05DC\u05D4\u05E0\u05D7\u05D9\u05D5\u05EA"
 
+        # ── TEMP DIAGNOSTIC (remove after one successful run) ─────────────────
+        if ($pageNum -le 2 -and $results.Count -eq 0) {
+            $esc = $rawHtml -replace '\r?\n', '↵'
+            Write-Host "  [RAW] msgType=[$msgType] len=$($rawHtml.Length)"
+            Write-Host "  [RAW] $($esc.Substring(0, [Math]::Min(800, $esc.Length)))"
+        }
+
         # ── Parse per-region/type sections ────────────────────────────────────
         # Split on any double-<br> (with optional whitespace between them)
         $sections = [regex]::Split($rawHtml, '<br\s*/?>\s*<br\s*/?>')
