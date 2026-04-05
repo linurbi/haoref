@@ -59,8 +59,8 @@ while (-not $done) {
     try {
         $resp = Invoke-WebRequest $url -UseBasicParsing -TimeoutSec 30 `
                     -Headers @{ 'User-Agent' = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-        # Force UTF-8 decoding to avoid ??? for Hebrew characters
-        $html = [System.Text.Encoding]::UTF8.GetString($resp.RawContentBytes)
+        # Use Content (PS Core on Linux already decodes as UTF-8 from charset header)
+        $html = $resp.Content
     } catch {
         Write-Host "ERROR fetching: $_"; break
     }
@@ -167,6 +167,11 @@ Write-Host "`nTotal: $($sorted.Count) records"
 if ($sorted.Count -gt 0) {
     Write-Host "Newest: $($sorted[0].alertDate)"
     Write-Host "Oldest: $($sorted[-1].alertDate)"
+}
+
+if ($sorted.Count -eq 0) {
+    Write-Host "No records to upload — aborting to avoid overwriting Gist with empty data."
+    exit 0
 }
 
 # ── Build JSON with actual UTF-8 Hebrew ──────────────────────────────────────
