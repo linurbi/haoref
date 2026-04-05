@@ -241,10 +241,30 @@ const OREF_URL     = "https://www.oref.org.il/warningMessages/alert/History/Aler
 const CF_WORKER_URL = "https://misty-pond-cb9d.linurbi.workers.dev";
 
 // ── GitHub Gist — primary historical data source ──────────────────────────
-const GIST_OWNER = "linurbi";
 const GIST_ID    = "972798220ff080e050a3a4a0d386b3e0";
-function gistRaw(file) {
-  return `https://gist.githubusercontent.com/${GIST_OWNER}/${GIST_ID}/raw/${file}?t=${Date.now()}`;
+// Fetch via the Gist API so we always get the current revision's raw_url
+// (the /raw/{filename} CDN shortcut is aggressively cached and goes stale)
+async function fetchGistFiles() {
+  const meta = await fetchWithTimeout(
+    `https://api.github.com/gists/${GIST_ID}`,
+    { cache: "no-store", headers: { Accept: "application/vnd.github+json" } }
+  );
+  if (!meta.ok) throw new Error(`Gist API HTTP ${meta.status}`);
+  const info = await meta.json();
+  const files = info.files || {};
+  async function getFile(name) {
+    const f = files[name];
+    if (!f) return [];
+    const r = await fetchWithTimeout(f.raw_url, { cache: "no-store" });
+    if (!r.ok) return [];
+    const j = await r.json();
+    return Array.isArray(j) ? j : [];
+  }
+  const [d1, d2] = await Promise.all([
+    getFile("oref_history_1.json"),
+    getFile("oref_history_2.json"),
+  ]);
+  return [...d1, ...d2];
 }
 
 // ── localStorage accumulation ─────────────────────────────────────────────
@@ -378,14 +398,9 @@ async function parseProxyResponse(resp, proxyHost) {
 }
 
 async function fetchAlerts() {
-  // -1a – Direct Gist fetch (highest priority — guaranteed to have Telegram history)
+  // -1a – Gist via API (always gets latest revision, no CDN staleness)
   try {
-    const [r1, r2] = await Promise.all([
-      fetchWithTimeout(gistRaw("oref_history_1.json"), { cache: "no-store" }),
-      fetchWithTimeout(gistRaw("oref_history_2.json"), { cache: "no-store" }),
-    ]);
-    const [d1, d2] = await Promise.all([r1.json(), r2.json()]);
-    const combined = [...(Array.isArray(d1) ? d1 : []), ...(Array.isArray(d2) ? d2 : [])];
+    const combined = await fetchGistFiles();
     if (combined.length > 0) {
       console.log(`[OREF] Gist OK — ${combined.length} records`);
       setSourceBadge("live", "● LIVE · Telegram history");

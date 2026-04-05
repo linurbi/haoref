@@ -53,14 +53,25 @@ async function handleRequest(request) {
   // ── Strategy 0: GitHub Gist — only used when no fromDate filter is requested ─
   if (GIST_ID && GIST_OWNER && !fromDateParam) {
     try {
-      var cacheBust = "?t=" + Date.now();
-      var base = "https://gist.githubusercontent.com/" + GIST_OWNER + "/" + GIST_ID + "/raw/";
-      var fetchOpts = { cf: { cacheEverything: false }, cache: "no-store" };
-      var r1 = await fetch(base + "oref_history_1.json" + cacheBust, fetchOpts);
-      var r2 = await fetch(base + "oref_history_2.json" + cacheBust, fetchOpts);
-      var d1 = JSON.parse(await r1.text());
-      var d2 = JSON.parse(await r2.text());
-      var combined = d1.concat(d2);
+      // Use the Gist API to get the current raw_url (includes revision hash → no CDN staleness)
+      var metaResp = await fetch("https://api.github.com/gists/" + GIST_ID, {
+        headers: { Accept: "application/vnd.github+json" },
+        cf: { cacheEverything: false },
+      });
+      var meta = await metaResp.json();
+      var files = meta.files || {};
+      async function fetchGistFile(name) {
+        var f = files[name];
+        if (!f || !f.raw_url) return [];
+        var r = await fetch(f.raw_url, { cf: { cacheEverything: false } });
+        var j = JSON.parse(await r.text());
+        return Array.isArray(j) ? j : [];
+      }
+      var parts = await Promise.all([
+        fetchGistFile("oref_history_1.json"),
+        fetchGistFile("oref_history_2.json"),
+      ]);
+      var combined = parts[0].concat(parts[1]);
       if (combined.length > 0) {
         return new Response(JSON.stringify(combined), {
           status: 200,
