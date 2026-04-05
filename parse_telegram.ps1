@@ -21,10 +21,23 @@ $results  = [System.Collections.ArrayList]::new()
 $seen     = [System.Collections.Generic.HashSet[string]]::new()
 
 $headers = @{ Authorization = "token $GITHUB_TOKEN"; Accept = "application/vnd.github+json" }
+function Load-GistFile([object]$fileInfo) {
+    if (-not $fileInfo) { return @() }
+    if ($fileInfo.truncated) {
+        # File > ~1 MB — content is truncated in the API response, must download via raw_url
+        Write-Host "    (large file — downloading via raw_url)"
+        $r = Invoke-WebRequest $fileInfo.raw_url -UseBasicParsing -Headers $headers -TimeoutSec 60
+        $parsed = $r.Content | ConvertFrom-Json
+        return if ($parsed) { @($parsed) } else { @() }
+    }
+    $parsed = $fileInfo.content | ConvertFrom-Json
+    return if ($parsed) { @($parsed) } else { @() }
+}
+
 try {
     $gistResp = Invoke-RestMethod "https://api.github.com/gists/$GIST_ID" -Headers $headers -UseBasicParsing
-    $existing1 = $gistResp.files."oref_history_1.json".content | ConvertFrom-Json
-    $existing2 = $gistResp.files."oref_history_2.json".content | ConvertFrom-Json
+    $existing1 = Load-GistFile $gistResp.files."oref_history_1.json"
+    $existing2 = Load-GistFile $gistResp.files."oref_history_2.json"
     $existing  = @($existing1) + @($existing2) | Where-Object { $_ -ne $null }
     foreach ($a in $existing) {
         [void]$results.Add($a)
