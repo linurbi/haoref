@@ -125,22 +125,13 @@ while (-not $done) {
 
         $advisoryRx = "\u05D9\u05E9 \u05DC\u05E4\u05E2\u05D5\u05DC|\u05D4\u05D9\u05DB\u05E0\u05E1\u05D5|\u05DE\u05E8\u05D7\u05D1 \u05DE\u05D5\u05D2\u05DF|\u05E4\u05D9\u05E7\u05D5\u05D3 \u05D4\u05E2\u05D5\u05E8\u05E3|\u05D4\u05E9\u05D5\u05D4\u05D9\u05DD|\u05D1\u05D4\u05EA\u05D0\u05DD \u05DC\u05D4\u05E0\u05D7\u05D9\u05D5\u05EA"
 
-        # ── DIAGNOSTIC: dump first non-skipped message on page 1 ─────────────
-        if ($pageNum -eq 1 -and $pageNew -eq 0 -and $pageSkipped -lt 3) {
-            Write-Host "  [DBG] msgType=[$msgType]"
-            Write-Host "  [DBG] rawHtml(500)=$($rawHtml.Substring(0,[Math]::Min(500,$rawHtml.Length)) -replace '\r?\n','↵')"
-            $dbgSecs = $rawHtml -split '<br><br>'
-            Write-Host "  [DBG] sections after split: $($dbgSecs.Count)"
-            for ($si=0; $si -lt [Math]::Min(3,$dbgSecs.Count); $si++) {
-                Write-Host "  [DBG]  sec[$si]=$($dbgSecs[$si].Substring(0,[Math]::Min(200,$dbgSecs[$si].Length)) -replace '\r?\n','↵')"
-            }
-        }
-
         # ── Parse per-region/type sections ────────────────────────────────────
-        $sections = $rawHtml -split '<br><br>'
+        # Split on any double-<br> (with optional whitespace between them)
+        $sections = [regex]::Split($rawHtml, '<br\s*/?>\s*<br\s*/?>')
         foreach ($sec in $sections) {
             $sec = $sec.Trim()
-            if ($sec -match '<strong>(.*?)</strong><br>(.+)') {
+            # Use [\s\S]+ so cities that appear on a new line are captured too
+            if ($sec -match '(?s)<strong>(.*?)</strong>\s*<br\s*/?>\s*([\s\S]+)') {
                 $sectionTitle = Strip-Html $Matches[1]
 
                 # Skip header sections (contain a date like "(8/3/2026)")
@@ -158,9 +149,10 @@ while (-not $done) {
                 if ($recTitle -match "\u05DB\u05D8\u05D1|\u05DB\u05D8\u05B7\u05D1\u05B4") { $recCat = 3 }
 
                 $citiesHtml = $Matches[2]
+                # Strip time-in-parens like (דקה וחצי), inline tags, then collapse whitespace
                 $citiesHtml = [regex]::Replace($citiesHtml, '\(<strong>[^<]*</strong>\)', '')
                 $citiesHtml = [regex]::Replace($citiesHtml, '<[^>]+>', ' ')
-                $citiesHtml = $citiesHtml.Trim()
+                $citiesHtml = ($citiesHtml -replace '[\r\n\t]+',' ').Trim()
 
                 $cities = $citiesHtml -split '[,،]' |
                     ForEach-Object { $_.Trim() -replace '[\r\n]+',' ' -replace '\s{2,}',' ' } |
