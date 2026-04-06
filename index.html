@@ -297,7 +297,7 @@ async function fetchDailyCasualties() {
 
 // ── Parse MOH response → display severity breakdown ──────────────────────────
 const CAS_SEVERITY = [
-  { status: "נפטרים בבי\"ח",   label: "נפטרו",       color: "#ff1155" },
+  { status: "נפטרים בבי\"ח",   label: "נפטרו בביה\"ח", color: "#ff1155" },
   { status: "אנוש",            label: "אנוש",         color: "#ff5500" },
   { status: "קשה",             label: "קשה",          color: "#ff8800" },
   { status: "בינוני",          label: "בינוני",       color: "#ffdd00" },
@@ -649,28 +649,9 @@ function drawOrigins(topOrigins) {
 }
 
 // ── Region distribution horizontal bar ──
-// Zones the API splits that all belong to the northern front
-const NORTH_ZONES = ["קו העימות", "גליל עליון", "גליל תחתון"];
-
-function mergeNorthZones(raw) {
-  let northTotal = 0;
-  const rest = [];
-  for (const item of raw) {
-    if (NORTH_ZONES.includes(item.zone)) {
-      northTotal += item.count;
-    } else {
-      rest.push(item);
-    }
-  }
-  if (northTotal > 0) rest.push({ zone: "צפון (קו העימות)", count: northTotal });
-  return rest.sort((a, b) => b.count - a.count);
-}
-
 function drawRegions(topRegions) {
   if (!topRegions || topRegions.length === 0) return;
-  // Accept both [{zone,count}] (API) and [[zone,count]] (legacy)
-  const raw   = topRegions.map(r => Array.isArray(r) ? { zone: r[0], count: r[1] } : r);
-  const items = mergeNorthZones(raw);
+  const items = topRegions.map(r => Array.isArray(r) ? { zone: r[0], count: r[1] } : r);
   buildOrUpdate("chartRegions", {
     type: "bar",
     data: {

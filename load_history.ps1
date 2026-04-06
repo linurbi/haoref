@@ -1,12 +1,16 @@
 # load_history.ps1 — Bulk-load RedAlert history into Cloudflare D1
-# Fill in the four CONFIG values below, then run:
-#   .\load_history.ps1
+# Stores (alert_id, zone) pairs — deduped via city→zone lookup from topCities.
+# Resulting tables:
+#   alerts       — one row per alarm event  (id, ts, type, origin)
+#   alert_zones  — one row per (event, zone) pair  (~3 rows per event)
+#
+# Run:  powershell -ExecutionPolicy Bypass -File .\load_history.ps1
 
 # ─── CONFIG ───────────────────────────────────────────────────────────────────
-$REDALERT_KEY   = "YOUR_REDALERT_PRIVATE_KEY"
-$CF_ACCOUNT_ID  = "YOUR_CLOUDFLARE_ACCOUNT_ID"
-$CF_API_TOKEN   = "YOUR_CLOUDFLARE_API_TOKEN"   # needs D1 write permission
-$D1_DATABASE_ID = "YOUR_D1_DATABASE_ID"
+$REDALERT_KEY   = "pr_lwrDSflxTRrUUfpgJMOHZjOQhZHkZfXVNVbkYbhqmEROeaFiLRulOHtFpnniKiVV"
+$CF_ACCOUNT_ID  = "913dd7d67a19b98eb74cab6d8e8e0b4a"
+$CF_API_TOKEN   = "cfat_vec9LvsRcJtkxrx5p15DkZbWiMdW53U9jp2bj9b8e52ce9e2"
+$D1_DATABASE_ID = "ac645c9a-e7cc-4eb1-a0b1-17fe4cc437e5"
 $OP_START       = "2026-02-28T00:00:00Z"
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -18,29 +22,93 @@ $CF_HEADERS = @{ Authorization = "Bearer $CF_API_TOKEN"; "Content-Type" = "appli
 
 # ── D1 helpers ────────────────────────────────────────────────────────────────
 
-function Invoke-D1Query($sql, $params = $null) {
-    $body = @{ sql = $sql }
-    if ($params) { $body.params = $params }
+function Invoke-D1Query([string]$sql) {
+    $body = @{ sql = $sql } | ConvertTo-Json -Depth 3
     $resp = Invoke-RestMethod -Uri "$D1_URL/query" -Method Post `
-        -Headers $CF_HEADERS -Body ($body | ConvertTo-Json -Depth 5) -ContentType "application/json"
+        -Headers $CF_HEADERS -Body $body -ContentType "application/json"
     if (-not $resp.success) { throw "D1 error: $($resp.errors | ConvertTo-Json)" }
     return $resp.result
 }
 
-function Invoke-D1Batch($statements) {
-    $body = @{ requests = $statements }
-    $resp = Invoke-RestMethod -Uri "$D1_URL/batch" -Method Post `
-        -Headers $CF_HEADERS -Body ($body | ConvertTo-Json -Depth 10) -ContentType "application/json"
-    if (-not $resp.success) { throw "D1 batch error: $($resp.errors | ConvertTo-Json)" }
+function EscSql($v) {
+    if ($null -eq $v)                                          { return "NULL" }
+    if ($v -is [int] -or $v -is [long] -or $v -is [double])   { return "$v"   }
+    return "'" + ($v.ToString() -replace "'", "''") + "'"
+}
+
+function Invoke-D1BulkInsert([string]$table, [string[]]$columns, $rows) {
+    $rowArray = @($rows)
+    [int]$total = $rowArray.Length
+    if ($total -eq 0) { return }
+    [int]$chunk = 200
+    [int]$i = 0
+    while ($i -lt $total) {
+        [int]$end   = [Math]::Min($i + $chunk - 1, $total - 1)
+        $slice = $rowArray[$i..$end]
+        $vals  = ($slice | ForEach-Object {
+            "(" + (($_ | ForEach-Object { EscSql $_ }) -join ",") + ")"
+        }) -join ","
+        $sql = "INSERT OR IGNORE INTO $table ($($columns -join ',')) VALUES $vals"
+        try { Invoke-D1Query $sql | Out-Null }
+        catch { Write-Warning "Insert failed [$table row $i]: $_" }
+        $i += $chunk
+        Start-Sleep -Milliseconds 120
+    }
 }
 
 function Get-LastTimestamp {
     try {
+        # If alert_zones is empty, we need a full pass regardless of alerts table
+        $zoneCount = (Invoke-D1Query "SELECT COUNT(*) AS n FROM alert_zones")[0].results[0].n
+        if ([int]$zoneCount -eq 0) { return $OP_START }
+
         $res = Invoke-D1Query "SELECT MAX(ts) AS last_ts FROM alerts"
         $val = $res[0].results[0].last_ts
         if ($val) { return $val } else { return $OP_START }
     } catch { return $OP_START }
 }
+
+# ── Build city→zone lookup — sliding weekly windows (API max = 50 per call) ──
+
+Write-Host "Building city->zone lookup (weekly windows) ..."
+$cityZone = @{}
+
+# Generate weekly windows from OP_START to today
+$winStart = [DateTime]::Parse($OP_START)
+$winEnd   = [DateTime]::UtcNow
+
+while ($winStart -lt $winEnd) {
+    $winStop = $winStart.AddDays(7)
+    if ($winStop -gt $winEnd) { $winStop = $winEnd }
+
+    $s = $winStart.ToString("yyyy-MM-ddTHH:mm:ssZ")
+    $e = $winStop.ToString("yyyy-MM-ddTHH:mm:ssZ")
+    $uri = "$REDALERT_BASE/api/stats/summary?startDate=$([Uri]::EscapeDataString($s))&endDate=$([Uri]::EscapeDataString($e))&include=topCities&topLimit=50"
+
+    try {
+        $data = Invoke-RestMethod -Uri $uri -Headers $RA_HEADERS -Method Get
+        $added = 0
+        foreach ($c in $data.topCities) {
+            if ($c.zone -and -not $cityZone.ContainsKey($c.city)) {
+                $cityZone[$c.city] = $c.zone
+                $added++
+            }
+        }
+        Write-Host "  $s -> $e : +$added new mappings (total $($cityZone.Count))"
+    } catch {
+        Write-Warning "  Window $s failed: $_"
+    }
+
+    $winStart = $winStop
+    Start-Sleep -Milliseconds 300
+}
+
+Write-Host "  Final lookup: $($cityZone.Count) city->zone mappings."
+
+# ── Ensure schema exists ──────────────────────────────────────────────────────
+
+Invoke-D1Query "CREATE TABLE IF NOT EXISTS alerts (id TEXT PRIMARY KEY, ts TEXT NOT NULL, type TEXT, origin TEXT)" | Out-Null
+Invoke-D1Query "CREATE TABLE IF NOT EXISTS alert_zones (alert_id TEXT NOT NULL, zone TEXT NOT NULL, PRIMARY KEY (alert_id, zone))" | Out-Null
 
 # ── Main load ─────────────────────────────────────────────────────────────────
 
@@ -48,10 +116,9 @@ $startDate = Get-LastTimestamp
 Write-Host "Last record in D1: $startDate"
 Write-Host "Starting load from $startDate ..."
 
-$offset     = 0
-$totalNew   = 0
-$pageSize   = 1000
-$batchSize  = 80    # D1 batch limit per request
+$offset   = 0
+$totalNew = 0
+$pageSize = 1000
 
 do {
     Write-Host "  Fetching offset=$offset ..." -NoNewline
@@ -60,59 +127,38 @@ do {
     $page   = Invoke-RestMethod -Uri "$REDALERT_BASE/api/stats/history?$params" `
                 -Headers $RA_HEADERS -Method Get
 
-    $alerts     = $page.data
-    $pagination = $page.pagination
-    Write-Host " $($alerts.Count) alerts  (total=$($pagination.total))"
+    $alerts  = $page.data
+    [int]$pgTotal = [int]$page.pagination.total
+    Write-Host " $($alerts.Count) alerts  (total=$pgTotal)"
 
     if ($alerts.Count -eq 0) { break }
 
-    # Build batch statements
-    $stmts = @()
+    # For each alert deduplicate zones via city lookup, then build row lists
+    $alertRows = [System.Collections.ArrayList]::new()
+    $zoneRows  = [System.Collections.ArrayList]::new()
+
     foreach ($a in $alerts) {
-        $stmts += @{
-            sql    = "INSERT OR IGNORE INTO alerts (id, ts, type, origin) VALUES (?,?,?,?)"
-            params = @($a.id, $a.timestamp, $a.type, $a.origin)
-        }
+        [void]$alertRows.Add(@($a.id, $a.timestamp, $a.type, $a.origin))
+
+        $seen = [System.Collections.Generic.HashSet[string]]::new()
         foreach ($c in $a.cities) {
-            $stmts += @{
-                sql    = "INSERT OR IGNORE INTO alert_cities (alert_id, city_id, city_name) VALUES (?,?,?)"
-                params = @($a.id, $c.id, $c.name)
+            $z = $cityZone[$c.name]
+            if ($z -and $seen.Add($z)) {
+                [void]$zoneRows.Add(@($a.id, $z))
             }
         }
     }
 
-    # Send in chunks of $batchSize
-    for ($i = 0; $i -lt $stmts.Count; $i += $batchSize) {
-        $chunk = $stmts[$i..([Math]::Min($i + $batchSize - 1, $stmts.Count - 1))]
-        Invoke-D1Batch $chunk
-        Start-Sleep -Milliseconds 150
-    }
+    Write-Host "    Inserting $($alertRows.Count) alert rows, $($zoneRows.Count) zone rows ..."
+    Invoke-D1BulkInsert "alerts"       @("id","ts","type","origin")   $alertRows
+    Invoke-D1BulkInsert "alert_zones"  @("alert_id","zone")           $zoneRows
+    Write-Host "    Done (page)."
 
     $totalNew += $alerts.Count
     $offset   += $alerts.Count
-    Start-Sleep -Milliseconds 500
+    Start-Sleep -Milliseconds 400
 
-} while ($pagination.hasMore)
+} while ($offset -lt $pgTotal)
 
 Write-Host "`nInserted/skipped $totalNew alert records."
-
-# ── Sync city→zone from summary ───────────────────────────────────────────────
-
-Write-Host "`nSyncing city→zone mappings ..."
-$summaryParams = "startDate=$([Uri]::EscapeDataString($OP_START))&include=topCities&topLimit=200"
-$summary       = Invoke-RestMethod -Uri "$REDALERT_BASE/api/stats/summary?$summaryParams" `
-                    -Headers $RA_HEADERS -Method Get
-
-$synced = 0
-foreach ($city in $summary.topCities) {
-    if ($city.zone) {
-        Invoke-D1Query `
-            "INSERT OR REPLACE INTO city_zones (city_id, city_name, zone)
-             SELECT ac.city_id, ?, ? FROM alert_cities ac WHERE ac.city_name = ? LIMIT 1" `
-            @($city.city, $city.zone, $city.city) | Out-Null
-        $synced++
-    }
-}
-Write-Host "  Synced $synced city→zone mappings."
-
 Write-Host "`nAll done!"
