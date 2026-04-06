@@ -28,7 +28,7 @@ async function handleRequest(request) {
   var apiUrl = REDALERT_BASE + "/api/stats/summary"
     + "?startDate=" + encodeURIComponent(startDate)
     + (endDate ? "&endDate=" + encodeURIComponent(endDate) : "")
-    + "&include=topCities,topZones,topOrigins,timeline,peak"
+    + "&include=topCities,topZones,topOrigins,timeline,peak,earlyWarnings"
     + "&timelineGroup=day"
     + "&topLimit=15";
 

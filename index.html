@@ -123,58 +123,68 @@
     </div>
   </div>
 
-  <!-- Hero KPI Strip -->
-  <section class="kpi-hero" aria-label="מדדים ראשיים">
-    <div class="kpi-hero-cell">
-      <div class="kpi-hero-label">סה"כ אירועי אזעקה · מתחילת המבצע</div>
-      <div class="kpi-hero-value" id="kpiTotal">—</div>
-      <div class="kpi-hero-sub" id="kpiCityHits">— יישובים ייחודיים</div>
-    </div>
-    <div class="kpi-hero-cell">
-      <div class="kpi-hero-label">אזעקות היום</div>
-      <div class="kpi-hero-value" id="kpiToday">—</div>
-      <div class="kpi-hero-sub" id="kpiTodayDate">24 שעות אחרונות</div>
-    </div>
-    <div class="kpi-hero-cell">
-      <div class="kpi-hero-label">שיא יומי</div>
-      <div class="kpi-hero-value" id="kpiPeak">—</div>
-      <div class="kpi-hero-sub" id="kpiPeakDate">—</div>
-    </div>
-    <div class="kpi-hero-cell">
-      <div class="kpi-hero-label">יישובים שהותקפו</div>
-      <div class="kpi-hero-value" id="kpiAreas">—</div>
-      <div class="kpi-hero-sub">אזורים ייחודיים</div>
-    </div>
-    <div class="kpi-hero-cell">
-      <div class="kpi-hero-label">ממוצע יומי</div>
-      <div class="kpi-hero-value" id="kpiAvg">—</div>
-      <div class="kpi-hero-sub">אזעקות ליום</div>
-    </div>
-  </section>
+  <!-- Compact KPI grid — 5 per row, 2 rows -->
+  <section class="kpi-block" aria-label="נתוני מפתח">
 
-  <!-- Secondary KPI row -->
-  <div class="kpi-row" aria-label="מדדים משניים">
-    <div class="kpi-card">
-      <div class="kpi-label">כטב"מ · בליסטי (תימן · איראן)</div>
-      <div class="kpi-value" id="kpiReal">—</div>
-      <div class="kpi-sub">אירועים בליסטיים</div>
+    <!-- Row A: main operational stats -->
+    <div class="kpi-bar kpi-bar-top">
+      <div class="kpi-cell c1">
+        <div class="kpi-lbl">סה"כ אזעקות</div>
+        <div class="kpi-num" id="kpiTotal">—</div>
+        <div class="kpi-sub">מתחילת המבצע</div>
+      </div>
+      <div class="kpi-cell c2">
+        <div class="kpi-lbl">אזעקות היום</div>
+        <div class="kpi-num" id="kpiToday">—</div>
+        <div class="kpi-sub">24 שעות אחרונות</div>
+      </div>
+      <div class="kpi-cell c3">
+        <div class="kpi-lbl">שיא יומי</div>
+        <div class="kpi-num" id="kpiPeak">—</div>
+        <div class="kpi-sub" id="kpiPeakDate">—</div>
+      </div>
+      <div class="kpi-cell c4">
+        <div class="kpi-lbl">יישובים שהותקפו</div>
+        <div class="kpi-num" id="kpiAreas">—</div>
+        <div class="kpi-sub" id="kpiCityHits">אזורים ייחודיים</div>
+      </div>
+      <div class="kpi-cell c5">
+        <div class="kpi-lbl">ממוצע יומי</div>
+        <div class="kpi-num" id="kpiAvg">—</div>
+        <div class="kpi-sub">אזעקות ליום</div>
+      </div>
     </div>
-    <div class="kpi-card">
-      <div class="kpi-label">7 ימים אחרונים</div>
-      <div class="kpi-value" id="kpiMevazek">—</div>
-      <div class="kpi-sub">אזעקות בשבוע</div>
+
+    <!-- Row B: supplemental stats -->
+    <div class="kpi-bar kpi-bar-bot">
+      <div class="kpi-cell c6">
+        <div class="kpi-lbl">כטב"מ · בליסטי</div>
+        <div class="kpi-num" id="kpiReal">—</div>
+        <div class="kpi-sub">תימן · איראן</div>
+      </div>
+      <div class="kpi-cell c7">
+        <div class="kpi-lbl">7 ימים אחרונים</div>
+        <div class="kpi-num" id="kpiMevazek">—</div>
+        <div class="kpi-sub">אזעקות בשבוע</div>
+      </div>
+      <div class="kpi-cell c8">
+        <div class="kpi-lbl">התרעות מוקדמות</div>
+        <div class="kpi-num" id="kpiPreAlert">—</div>
+        <div class="kpi-sub">מבזק — לפני אזעקה</div>
+      </div>
+      <div class="kpi-cell c9">
+        <div class="kpi-lbl">יירוטים (צה"ל)</div>
+        <div class="kpi-num" id="kpiIntercepted">—</div>
+        <div class="kpi-sub">מכלל השיגורים</div>
+      </div>
+      <div class="kpi-cell c10">
+        <div class="kpi-lbl">אחוז יירוט</div>
+        <div class="kpi-num" id="kpiInterceptRate">—</div>
+        <div class="kpi-sub">ממוצע כלל הסוגים</div>
+      </div>
     </div>
-    <div class="kpi-card">
-      <div class="kpi-label">סה"כ יירוטים (צה"ל)</div>
-      <div class="kpi-value" id="kpiIntercepted">—</div>
-      <div class="kpi-sub">מכלל השיגורים</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-label">אחוז יירוט</div>
-      <div class="kpi-value" id="kpiInterceptRate">—</div>
-      <div class="kpi-sub">ממוצע כלל הסוגים</div>
-    </div>
-  </div>
+
+  </section>
 
   <!-- Origins Hero Cards -->
   <section class="origins-section" aria-label="מקורות שיגור">
@@ -385,6 +395,8 @@ function buildStats(api) {
   const topOrigins  = api.topOrigins  || [];
   const peak        = api.peak        || {};
   const totals      = api.totals      || {};
+  // Pre-alerts: try several field names the API might use
+  const preAlerts   = totals.preAlerts ?? totals.earlyWarnings ?? totals.preWarnings ?? totals.warnings ?? null;
 
   // Daily sorted array [[date, count], ...]
   const byDay = timeline
@@ -409,13 +421,14 @@ function buildStats(api) {
     today:       totals.last24h   || 0,
     last7d:      totals.last7d    || 0,
     uniqueAreas: api.uniqueCities || 0,
+    preAlerts,
     realAlerts,
     peakDay:     peakEntry,
     avgPerDay,
     byDay,
-    topCities,   // [{city, zone, count}]
-    topZones,    // [{zone, count}]
-    topOrigins,  // [{origin, count}]
+    topCities,
+    topZones,
+    topOrigins,
   };
 }
 
@@ -432,6 +445,16 @@ function updateKPIs(stats) {
   anim("kpiAvg",    stats.avgPerDay);
   anim("kpiReal",   stats.realAlerts);
   anim("kpiMevazek",stats.last7d);
+
+  // Pre-alerts: animate if the API provides the number, otherwise show N/A
+  const preEl = document.getElementById("kpiPreAlert");
+  if (preEl) {
+    if (stats.preAlerts !== null) {
+      countUp(preEl, stats.preAlerts);
+    } else {
+      preEl.textContent = "N/A";
+    }
+  }
 
   setText("kpiCityHits", stats.uniqueAreas.toLocaleString("he-IL") + " יישובים ייחודיים");
   setText("kpiPeakDate", formatDate(stats.peakDay[0]));
@@ -826,8 +849,8 @@ function showConnectionError() {
   setSourceBadge("demo", "● NO DATA");
   showBanner("bannerError");
   hideBanner("bannerProxy");
-  ["kpiTotal","kpiToday","kpiTodayDate","kpiPeak","kpiPeakDate",
-   "kpiAreas","kpiAvg","kpiReal","kpiMevazek"].forEach(id => setText(id, "—"));
+  ["kpiTotal","kpiToday","kpiPeak","kpiPeakDate","kpiAreas",
+   "kpiAvg","kpiReal","kpiMevazek","kpiPreAlert","kpiIntercepted","kpiInterceptRate"].forEach(id => setText(id, "—"));
 }
 
 async function refresh() {
