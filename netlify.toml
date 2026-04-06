@@ -1,7 +1,0 @@
-[functions]
-  directory = "netlify/functions"
-
-[[redirects]]
-  from = "/api/oref"
-  to   = "/.netlify/functions/oref"
-  status = 200
