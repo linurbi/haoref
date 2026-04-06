@@ -393,4 +393,40 @@ main { padding:28px 40px; max-width:1640px; margin:0 auto; }
   .kpi-num { font-size:32px; }
   .origins-grid { grid-template-columns:1fr 1fr; }
   .logo-text p { display:none; }
+  .cas-grid { grid-template-columns:repeat(3,1fr); }
+}
+
+/* ── MOH Casualties section ── */
+.cas-card {
+  margin-bottom: var(--gap);
+}
+.cas-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 12px;
+}
+.cas-cell {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 10px;
+  padding: 14px 8px 10px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.cas-num {
+  font-family: 'Bebas Neue', cursive;
+  font-size: 32px;
+  line-height: 1;
+  letter-spacing: 1px;
+}
+.cas-lbl {
+  font-size: 11px;
+  color: rgba(255,255,255,0.55);
+  letter-spacing: 0.5px;
+}
+@media (max-width:900px) {
+  .cas-grid { grid-template-columns:repeat(4,1fr); }
 }

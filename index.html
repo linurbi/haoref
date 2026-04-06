@@ -217,7 +217,13 @@
     </div>
   </div>
 
-  <!-- Row 3: Weapons + Casualties -->
+  <!-- Row 3: MOH Casualties by severity -->
+  <div class="chart-card cas-card">
+    <div class="card-title"><div class="dot" aria-hidden="true"></div>נפגעים — נתוני משרד הבריאות <span class="card-unit" id="casOpLabel"></span></div>
+    <div class="cas-grid" id="casGrid" role="list" aria-label="נפגעים לפי חומרה"></div>
+  </div>
+
+  <!-- Row 4: Weapons + Casualties over time -->
   <div class="charts-grid">
     <div class="chart-card">
       <div class="card-title"><div class="dot" aria-hidden="true"></div>טילים וכטב"מים — דיווחי צה"ל</div>
@@ -260,6 +266,78 @@
 const OP_START      = "2026-02-28T00:00:00Z";  // Operation start date
 const UPDATE_EVERY  = 3600; // seconds
 const CF_WORKER_URL = "https://misty-pond-cb9d.linurbi.workers.dev";
+
+// ── Fetch MOH casualties (once on load, not filter-dependent) ────────────────
+async function fetchCasualties() {
+  try {
+    const resp = await fetch(CF_WORKER_URL + "/casualties", { cache: "no-store" });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+    return data;
+  } catch (e) {
+    console.warn("Casualties fetch failed:", e.message);
+    return null;
+  }
+}
+
+// ── Parse MOH response → display severity breakdown ──────────────────────────
+const CAS_SEVERITY = [
+  { status: "נפטרים בבי\"ח",   label: "נפטרו",       color: "#ff1155" },
+  { status: "אנוש",            label: "אנוש",         color: "#ff5500" },
+  { status: "קשה",             label: "קשה",          color: "#ff8800" },
+  { status: "בינוני",          label: "בינוני",       color: "#ffdd00" },
+  { status: "קל",              label: "קל",           color: "#77ff22" },
+  { status: "חרדה ונפש",       label: "חרדה / נפש",  color: "#00ccff" },
+  { status: "מאושפזים כרגע",   label: "מאושפזים כרגע", color: "#cc44ff", type: "מאושפזים כרגע" },
+];
+
+// Prefer current operation "שאגת הארי"; fall back to total
+const OP_PREF = ["שאגת הארי", "סך הכל"];
+
+function buildCasualties(raw) {
+  if (!raw || !Array.isArray(raw)) return null;
+  let opLabel = "";
+  for (const op of OP_PREF) {
+    const rows = raw.filter(r => r.eventType === op);
+    if (rows.length) { opLabel = op === "סך הכל" ? "סה\"כ כל המבצעים" : op; break; }
+  }
+  const opRows = raw.filter(r => r.eventType === (opLabel === "סה\"כ כל המבצעים" ? "סך הכל" : opLabel));
+
+  const get = (status, type) => {
+    const t = type || "נפגעים לפי חומרה בקליטה";
+    const row = opRows.find(r => r.status === status && r.type === t);
+    return row ? row.casualtiesCount : 0;
+  };
+
+  const total = get("סה\"כ נפגעים", "אחר") || get("סה\"כ נפגעים", "נפגעים לפי חומרה בקליטה");
+
+  return {
+    opLabel,
+    total,
+    rows: CAS_SEVERITY.map(s => ({
+      ...s,
+      count: get(s.status, s.type),
+    })),
+  };
+}
+
+function drawCasualties(cas) {
+  const grid = document.getElementById("casGrid");
+  const opEl = document.getElementById("casOpLabel");
+  if (!grid || !cas) return;
+
+  opEl.textContent = cas.opLabel + " · " + cas.total.toLocaleString("he-IL") + " נפגעים";
+
+  grid.innerHTML = cas.rows.map(r => `
+    <div class="cas-cell" role="listitem">
+      <div class="cas-num" style="color:${r.color};text-shadow:0 0 14px ${r.color}88">
+        ${r.count.toLocaleString("he-IL")}
+      </div>
+      <div class="cas-lbl">${r.label}</div>
+    </div>
+  `).join("");
+}
 
 // ── Fetch stats from CF Worker → RedAlert API ────────────────────────────────
 async function fetchStats(startDate, endDate) {
@@ -727,7 +805,7 @@ function drawWeapons() {
 }
 
 // ── Casualties over time ──
-function drawCasualties() {
+function drawCasualtiesChart() {
   buildOrUpdate("chartCasualties", {
     type: "line",
     data: {
@@ -865,7 +943,7 @@ function renderStats(stats) {
   drawRegions(stats.topZones);
   drawThreats(stats.topOrigins);
   drawWeapons();
-  drawCasualties();
+  drawCasualtiesChart();
   drawAlertTypes(stats.topOrigins);
   drawInterceptions();
 }
@@ -1006,17 +1084,21 @@ window.addEventListener("load", async () => {
   // Short pause to let the progress bar animation start
   await new Promise(resolve => setTimeout(resolve, 600));
 
+  // Fetch casualties from MOH in parallel with main stats
+  fetchCasualties().then(raw => {
+    const cas = buildCasualties(raw);
+    if (cas) drawCasualties(cas);
+  });
+
   try {
     await refresh();
   } catch (err) {
     console.error("Boot error:", err);
     showConnectionError();
   } finally {
-    // Static IDF charts render regardless of live data availability.
-    // Each is wrapped so a single failure cannot block hideLoader().
-    try { drawWeapons();      } catch (e) { console.warn("drawWeapons failed:",      e); }
-    try { drawCasualties();   } catch (e) { console.warn("drawCasualties failed:",   e); }
-    try { drawInterceptions();} catch (e) { console.warn("drawInterceptions failed:",e); }
+    try { drawWeapons();          } catch (e) { console.warn("drawWeapons failed:",      e); }
+    try { drawCasualtiesChart();  } catch (e) { console.warn("drawCasualties failed:",   e); }
+    try { drawInterceptions();    } catch (e) { console.warn("drawInterceptions failed:",e); }
     hideLoader();
   }
 });
