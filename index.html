@@ -156,9 +156,9 @@
       <div class="kpi-sub">אירועים (תימן · איראן)</div>
     </div>
     <div class="kpi orange">
-      <div class="kpi-label">התרעות מוקדמות</div>
+      <div class="kpi-label">אזעקות 7 ימים</div>
       <div class="kpi-value" id="kpiMevazek">—</div>
-      <div class="kpi-sub">מבזק — לא בהכרח אזעקה</div>
+      <div class="kpi-sub">7 ימים אחרונים</div>
     </div>
     <div class="kpi cyan">
       <div class="kpi-label">סה"כ יירוטים</div>
@@ -179,8 +179,8 @@
       <div class="chart-wrap tall"><canvas id="chartDaily" aria-label="גרף אזעקות לפי יום"></canvas></div>
     </div>
     <div class="chart-card">
-      <div class="card-title"><div class="dot" aria-hidden="true"></div>התפלגות לפי שעה</div>
-      <div class="chart-wrap tall"><canvas id="chartHourly" aria-label="גרף התפלגות לפי שעה"></canvas></div>
+      <div class="card-title"><div class="dot" aria-hidden="true"></div>התפלגות לפי מקור שיגור</div>
+      <div class="chart-wrap tall"><canvas id="chartHourly" aria-label="גרף התפלגות לפי מקור שיגור"></canvas></div>
     </div>
   </div>
 
@@ -191,9 +191,9 @@
       <div class="chart-wrap tall"><canvas id="chartAreas" aria-label="גרף יישובים מותקפים ביותר"></canvas></div>
     </div>
     <div class="chart-card">
-      <div class="card-title"><div class="dot" aria-hidden="true"></div>סוגי איומים</div>
+      <div class="card-title"><div class="dot" aria-hidden="true"></div>מקורות שיגור</div>
       <div class="chart-wrap scroll">
-        <div class="threat-grid" id="threatGrid" role="list" aria-label="סוגי איומים"></div>
+        <div class="threat-grid" id="threatGrid" role="list" aria-label="מקורות שיגור"></div>
       </div>
     </div>
     <div class="chart-card">
@@ -217,7 +217,7 @@
   <!-- Row 4: Alert types + Interception breakdown -->
   <div class="charts-grid">
     <div class="chart-card">
-      <div class="card-title"><div class="dot" aria-hidden="true"></div>סוגי אזעקות — ממשיות מול הנחיות</div>
+      <div class="card-title"><div class="dot" aria-hidden="true"></div>מקורות שיגור — התפלגות</div>
       <div class="chart-wrap"><canvas id="chartAlertTypes" aria-label="גרף סוגי אזעקות"></canvas></div>
     </div>
     <div class="chart-card">
@@ -234,74 +234,41 @@
 // ═══════════════════════════════════════════════
 // CONFIG
 // ═══════════════════════════════════════════════
-const START_DATE   = new Date("2026-02-28T00:00:00");
-const UPDATE_EVERY = 3600; // seconds
-const OREF_URL     = "https://www.oref.org.il/warningMessages/alert/History/AlertsHistory.json";
-
+const OP_START      = "2026-02-28T00:00:00Z";  // Operation start date
+const UPDATE_EVERY  = 3600; // seconds
 const CF_WORKER_URL = "https://misty-pond-cb9d.linurbi.workers.dev";
 
-// ── GitHub repo data branch — primary historical data source ─────────────────
-// Data files are pushed here by the GitHub Actions workflow (no API size limits)
-const DATA_BRANCH_BASE = "https://raw.githubusercontent.com/linurbi/haoref/data";
-async function fetchDataFiles() {
-  const t = Date.now();
-  const [r1, r2] = await Promise.all([
-    fetchWithTimeout(`${DATA_BRANCH_BASE}/oref_history_1.json?t=${t}`, { cache: "no-store" }),
-    fetchWithTimeout(`${DATA_BRANCH_BASE}/oref_history_2.json?t=${t}`, { cache: "no-store" }),
-  ]);
-  const [d1, d2] = await Promise.all([
-    r1.ok ? r1.json() : Promise.resolve([]),
-    r2.ok ? r2.json() : Promise.resolve([]),
-  ]);
-  return [...(Array.isArray(d1) ? d1 : []), ...(Array.isArray(d2) ? d2 : [])];
+// ── Fetch stats from CF Worker → RedAlert API ────────────────────────────────
+async function fetchStats(startDate, endDate) {
+  let url = CF_WORKER_URL;
+  const params = new URLSearchParams();
+  if (startDate) params.set("startDate", startDate);
+  if (endDate)   params.set("endDate",   endDate);
+  if ([...params].length) url += "?" + params.toString();
+
+  const resp = await fetch(url, { cache: "no-store" });
+  if (!resp.ok) throw new Error(`Worker HTTP ${resp.status}`);
+  const data = await resp.json();
+  if (data.error) throw new Error(data.error);
+  return data;
 }
 
-// ── localStorage accumulation ─────────────────────────────────────────────
-// OREF only returns a rolling window (~last few hours). We merge every fresh
-// fetch into the browser cache so history grows across visits automatically.
-const CACHE_KEY = "haoref_alerts_v1";
-const CACHE_MAX = 50000; // max records to keep in localStorage
+// ── Origin → Hebrew label map ─────────────────────────────────────────────────
+const ORIGIN_LABELS = {
+  lebanon: "לבנון (חיזבאללה)",
+  iran:    "איראן",
+  gaza:    "עזה (חמאס)",
+  yemen:   "תימן (חות'ים)",
+  fa:      "גדה המערבית",
+  hamas:   "חמאס",
+  isis:    "דאעש",
+};
+function originLabel(o) { return ORIGIN_LABELS[o] || o; }
 
-function getCachedAlerts() {
-  try { return JSON.parse(localStorage.getItem(CACHE_KEY) || "[]"); }
-  catch { return []; }
-}
+// ── Active filter state ───────────────────────────────────────────────────────
+let currentStartDate = OP_START;
+let currentEndDate   = "";
 
-function mergeIntoCache(freshAlerts) {
-  const existing = getCachedAlerts();
-  const seen = new Set(existing.map(a => `${a.alertDate}||${a.data}`));
-  let added = 0;
-  for (const a of freshAlerts) {
-    const key = `${a.alertDate}||${a.data}`;
-    if (!seen.has(key)) { existing.push(a); seen.add(key); added++; }
-  }
-  if (added > 0) {
-    existing.sort((a, b) => new Date(b.alertDate) - new Date(a.alertDate));
-    const trimmed = existing.slice(0, CACHE_MAX);
-    try { localStorage.setItem(CACHE_KEY, JSON.stringify(trimmed)); }
-    catch { /* storage full – skip */ }
-    console.log(`[cache] +${added} new records → ${trimmed.length} total stored`);
-  }
-  return existing;
-}
-// ─────────────────────────────────────────────────────────────────────────────
-
-// Note: "Referer" is a browser-forbidden header and is silently stripped — only X-Requested-With is actually sent
-const OREF_HEADERS = { "X-Requested-With": "XMLHttpRequest" };
-// Generous timeout — OREF history JSON can be large; proxies run in parallel so cost is one timeout, not N×timeout
-const FETCH_TIMEOUT_MS = 25000;
-
-// Proxy services — all run simultaneously; first valid response wins.
-// corsproxy.io and codetabs return 403/HTML for null (file://) origins, so they are excluded.
-const PROXIES = [
-  u => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`,   // returns JSON wrapper
-  u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,   // raw response
-  u => `https://thingproxy.freeboard.io/fetch/${u}`,                    // no origin check
-  u => `https://corsproxy.org/?url=${encodeURIComponent(u)}`,           // .org (different from .io)
-];
-
-// Alternative OREF URL (different capitalisation / path, same data)
-const OREF_URL_ALT = "https://www.oref.org.il/WarningMessages/History/AlertsHistory.json";
 
 // ── Chart.js dark-theme defaults ──
 Chart.defaults.color          = "rgba(255,255,255,0.5)";
@@ -326,267 +293,55 @@ const CASUALTIES_DATA = {
   injured: [21, 72, 72, 285, 385],
 };
 
-const CATEGORY_MAP = {
-  1:   { name: "ירי טילים ורקטות",        color: "#ff4422", emoji: "🚀" },
-  2:   { name: "חדירת כטב\"מ",             color: "#ff8800", emoji: "🛸" },
-  6:   { name: "טיל בליסטי",              color: "#ff0000", emoji: "☄️" },
-  13:  { name: "הנחיה מקדימה",             color: "#ffcc00", emoji: "⚡" },
-  14:  { name: "שיגור מאיראן",             color: "#cc00ff", emoji: "🇮🇷" },
-  101: { name: "ניתן לצאת ממרחב מוגן",    color: "#00ff88", emoji: "✅" },
-};
-
-// Categories that represent a real attack (not informational/all-clear)
-const REAL_ATTACK_CATS = new Set([1, 2, 6, 14]);
 
 // ═══════════════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════════════
 const charts = {};
-let allAlerts         = [];
-let filterFrom        = null;
-let filterTo          = null;
 let countdown         = UPDATE_EVERY;
 let countdownInterval = null;
 
 // ═══════════════════════════════════════════════
-// FETCH  (direct → CORS proxy → demo fallback)
+// MAP API RESPONSE → DISPLAY STATS
 // ═══════════════════════════════════════════════
-async function fetchWithTimeout(url, options = {}) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  try {
-    const resp = await fetch(url, { ...options, signal: controller.signal });
-    return resp;
-  } finally {
-    clearTimeout(timer);
-  }
-}
+function buildStats(api) {
+  const timeline    = api.timeline    || [];
+  const topCities   = api.topCities   || [];
+  const topZones    = api.topZones    || [];
+  const topOrigins  = api.topOrigins  || [];
+  const peak        = api.peak        || {};
+  const totals      = api.totals      || {};
 
-// Parse and validate a single proxy response into a usable data array
-async function parseProxyResponse(resp, proxyHost) {
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-  const text = await resp.text();
-  let data;
-  try { data = JSON.parse(text); }
-  catch { throw new Error("invalid JSON"); }
+  // Daily sorted array [[date, count], ...]
+  const byDay = timeline
+    .slice()
+    .sort((a, b) => a.period.localeCompare(b.period))
+    .map(t => [t.period, t.count]);
 
-  // allorigins /get wraps: { contents: "...", status: { http_code: 200 } }
-  if (data && typeof data.contents === "string") {
-    const code = data.status?.http_code;
-    if (code && code !== 200) throw new Error(`upstream HTTP ${code}`);
-    try { data = JSON.parse(data.contents); }
-    catch { throw new Error("bad contents JSON"); }
-  }
+  const peakEntry = peak.period
+    ? [peak.period, peak.count]
+    : byDay.reduce((m, e) => (e[1] > m[1] ? e : m), ["", 0]);
 
-  // Tolerate wrapped objects like { alerts: [...] }
-  if (!Array.isArray(data))
-    data = data?.alerts ?? data?.data ?? data?.warnings ?? Object.values(data ?? {})[0];
+  const avgPerDay = byDay.length ? Math.round(totals.range / byDay.length) : 0;
 
-  if (!Array.isArray(data) || data.length === 0) throw new Error("no usable array");
-  return data;
-}
-
-async function fetchAlerts() {
-  // -1a – GitHub repo data branch (no size limits, no API truncation)
-  try {
-    const combined = await fetchDataFiles();
-    if (combined.length > 0) {
-      console.log(`[OREF] Repo data OK — ${combined.length} records`);
-      setSourceBadge("live", "● LIVE · Telegram history");
-      hideBanner("bannerError");
-      hideBanner("bannerProxy");
-      return filterFromStart(combined);
-    }
-  } catch (e) { console.warn("[OREF] Repo data failed:", e.message); }
-
-  // -1b – Cloudflare Worker (fallback, also tries OREF API)
-  if (CF_WORKER_URL) {
-    try {
-      const resp = await fetchWithTimeout(CF_WORKER_URL, { cache: "no-cache" });
-      const data = await parseProxyResponse(resp);
-      if (data.length > 0) {
-        console.log(`[OREF] Cloudflare Worker OK — ${data.length} records`);
-        setSourceBadge("live", "● LIVE · Cloudflare Worker");
-        hideBanner("bannerError");
-        hideBanner("bannerProxy");
-        return filterFromStart(data);
-      }
-    } catch (e) { console.warn("[OREF] Cloudflare Worker failed:", e.message); }
-  }
-
-  // 0 – Netlify Function (/.netlify/functions/oref).
-  //     Runs server-side with full header control + cookie warmup.
-  //     No CORS at all — response comes from our own Netlify domain.
-  if (window.location.protocol !== "file:") {
-    try {
-      const resp = await fetchWithTimeout("/.netlify/functions/oref", { cache: "no-cache" });
-      const data = await parseProxyResponse(resp);
-      if (data.length > 0) {
-        console.log(`[OREF] Netlify Function OK — ${data.length} records`);
-        setSourceBadge("live", "● LIVE · Netlify Function");
-        hideBanner("bannerError");
-        hideBanner("bannerProxy");
-        return filterFromStart(data);
-      }
-    } catch (e) { console.warn("[OREF] Netlify Function failed:", e.message); }
-  }
-
-  // 1 – Try direct (works from Israel or with Israeli VPN)
-  for (const url of [OREF_URL, OREF_URL_ALT]) {
-    try {
-      const resp = await fetchWithTimeout(url, { headers: OREF_HEADERS, cache: "no-cache" });
-      console.log(`[OREF] direct → HTTP ${resp.status}`);
-      if (resp.ok) {
-        const data = await resp.json();
-        if (Array.isArray(data) && data.length > 0) {
-          console.log(`[OREF] direct OK — ${data.length} records`);
-          setSourceBadge("live", "● LIVE · oref.org.il");
-          hideBanner("bannerError");
-          hideBanner("bannerProxy");
-          return filterFromStart(data);
-        }
-      }
-    } catch (e) { console.warn(`[OREF] direct failed:`, e.message); }
-  }
-
-  // 2 – Race all proxies in PARALLEL — first valid response wins
-  console.log("[OREF] Trying all proxies in parallel…");
-  const winner = await Promise.any(
-    PROXIES.map(async makeUrl => {
-      const proxyUrl  = makeUrl(OREF_URL);
-      const proxyHost = proxyUrl.split("/")[2];
-      const resp      = await fetchWithTimeout(proxyUrl, { cache: "no-cache" });
-      const data      = await parseProxyResponse(resp, proxyHost);
-      console.log(`[OREF] ${proxyHost} OK — ${data.length} records`);
-      return { data, proxyHost };
-    })
-  ).catch(e => {
-    console.error("[OREF] All proxies failed:", e?.errors?.map(x => x.message) ?? e.message);
-    return null;
-  });
-
-  if (winner) {
-    setSourceBadge("proxy", `● PROXY · ${winner.proxyHost}`);
-    hideBanner("bannerError");
-    showBanner("bannerProxy");
-    return filterFromStart(winner.data);
-  }
-
-  // All sources failed
-  throw new Error("כל מקורות הנתונים נכשלו");
-}
-
-// Robust date parser — handles ISO and DD/MM/YYYY HH:MM:SS formats
-function parseAlertDate(str) {
-  if (!str) return null;
-  // "YYYY-MM-DD HH:MM:SS" — our stored UTC format: add Z so browser treats it as UTC
-  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(str)) {
-    const d = new Date(str.replace(" ", "T") + "Z");
-    if (!isNaN(d)) return d;
-  }
-  // ISO with T — try as-is
-  let d = new Date(str);
-  if (!isNaN(d)) return d;
-  // DD/MM/YYYY [HH:MM:SS]
-  const m = str.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})(?:\s+(\d{1,2}:\d{2}(?::\d{2})?))?/);
-  if (m) {
-    d = new Date(`${m[3]}-${m[2].padStart(2,"0")}-${m[1].padStart(2,"0")}${m[4] ? "T"+m[4]+"Z" : "Z"}`);
-    if (!isNaN(d)) return d;
-  }
-  return null;
-}
-
-function filterFromStart(data) {
-  return data.filter(a => {
-    const d = parseAlertDate(a.alertDate);
-    return d && d >= START_DATE;
-  });
-}
-
-// ═══════════════════════════════════════════════
-// PROCESS DATA
-// ═══════════════════════════════════════════════
-const ADVISORY_RE = /יש לפעול|היכנסו|מרחב מוגן|פיקוד העורף|השוהים|יש להיכנס|בהתאם להנחיות|לפעול בהתאם/;
-function looksLikeCity(s) {
-  return s && s.length <= 50 && !ADVISORY_RE.test(s);
-}
-
-function processAlerts(raw) {
-  const byDay      = {};
-  const byHour     = Array(24).fill(0);
-  const byArea     = {};
-  const byRegion   = {};
-  const byCategory = {};
-  const byTitle    = {};
-  const todayStr   = new Date().toISOString().split("T")[0];
-
-  // Separate pre-alerts (מבזק, cat 4) from actual alarms
-  const seenAlarmEvents   = new Set();   // actual alarms only
-  const seenMevazekEvents = new Set();   // pre-alerts only
-  const byDayAlarms       = {};
-
-  for (const a of raw) {
-    const dt   = parseAlertDate(a.alertDate);
-    if (!dt) continue;
-    const day    = dt.toISOString().split("T")[0];
-    const hour   = dt.getUTCHours();
-    const area   = a.data   || "לא ידוע";
-    const region = a.region || "";
-    const cat    = parseInt(a.category, 10) || 1;
-    const title  = a.title  || "";
-    const isMevazek = (cat === 4);
-
-    // Unique event = same title + same minute bucket
-    const minBucket = Math.floor(dt.getTime() / 60000);
-    const eventKey  = `${minBucket}||${title}`;
-
-    if (isMevazek) {
-      seenMevazekEvents.add(eventKey);
-    } else {
-      if (!seenAlarmEvents.has(eventKey)) {
-        seenAlarmEvents.add(eventKey);
-        byDayAlarms[day] = (byDayAlarms[day] || 0) + 1;
-      }
-    }
-
-    if (!isMevazek) {
-      byDay[day]      = (byDay[day]      || 0) + 1;
-      byHour[hour]   += 1;
-      byCategory[cat] = (byCategory[cat] || 0) + 1;
-      byTitle[title]  = (byTitle[title]  || 0) + 1;
-      if (looksLikeCity(area))   byArea[area]     = (byArea[area]     || 0) + 1;
-      if (region)                byRegion[region] = (byRegion[region] || 0) + 1;
-    }
-  }
-
-  const sortedDaysAlarms = Object.entries(byDayAlarms).sort(([a],[b]) => a.localeCompare(b));
-  const peakDay        = sortedDaysAlarms.reduce((m, e) => (e[1] > m[1] ? e : m), ["", 0]);
-  const avgPerDay      = sortedDaysAlarms.length ? Math.round(seenAlarmEvents.size / sortedDaysAlarms.length) : 0;
-  const topAreas       = Object.entries(byArea).sort(([,a],[,b]) => b - a).slice(0, 15);
-  const topRegions     = Object.entries(byRegion).sort(([,a],[,b]) => b - a);
-  // Category 3 = כטב"מ ballistic missile (Yemen / Iran proxy)
-  const seenBallisticEvents = new Set(
-    raw.filter(a => (parseInt(a.category,10)||1) === 3)
-       .map(a => `${Math.floor(parseAlertDate(a.alertDate)?.getTime()/60000)}||${a.title||""}`)
-  );
-  const realAlerts = seenBallisticEvents.size;
+  // Origins: Iran + Yemen = ballistic proxy
+  const ballisticOrigins = ["iran", "yemen", "fa"];
+  const realAlerts = topOrigins
+    .filter(o => ballisticOrigins.includes(o.origin))
+    .reduce((s, o) => s + o.count, 0);
 
   return {
-    total:        seenAlarmEvents.size,
-    cityHits:     raw.filter(a => (parseInt(a.category,10)||1) !== 4).length,
-    mevazek:      seenMevazekEvents.size,
+    total:       totals.range     || 0,
+    today:       totals.last24h   || 0,
+    last7d:      totals.last7d    || 0,
+    uniqueAreas: api.uniqueCities || 0,
     realAlerts,
-    today:        byDayAlarms[todayStr] || 0,
-    todayDate:    todayStr,
-    peakDay,
+    peakDay:     peakEntry,
     avgPerDay,
-    uniqueAreas:  Object.keys(byArea).length,
-    byDay:        sortedDaysAlarms,
-    byHour,
-    topAreas,
-    topRegions,
-    byCategory,
-    byTitle,
+    byDay,
+    topCities,   // [{city, zone, count}]
+    topZones,    // [{zone, count}]
+    topOrigins,  // [{origin, count}]
   };
 }
 
@@ -595,16 +350,15 @@ function processAlerts(raw) {
 // ═══════════════════════════════════════════════
 function updateKPIs(stats) {
   setText("kpiTotal",    stats.total.toLocaleString("he-IL"));
-  setText("kpiCityHits", stats.cityHits.toLocaleString("he-IL") + " פגיעות יישובים");
+  setText("kpiCityHits", stats.uniqueAreas.toLocaleString("he-IL") + " יישובים ייחודיים");
   setText("kpiToday",    stats.today.toLocaleString("he-IL"));
-  setText("kpiTodayDate",formatDate(stats.todayDate));
+  setText("kpiTodayDate","24 שעות אחרונות");
   setText("kpiPeak",     stats.peakDay[1].toLocaleString("he-IL"));
   setText("kpiPeakDate", formatDate(stats.peakDay[0]));
   setText("kpiAreas",    stats.uniqueAreas.toLocaleString("he-IL"));
   setText("kpiAvg",      stats.avgPerDay.toLocaleString("he-IL"));
-
-  setText("kpiReal",    stats.realAlerts.toLocaleString("he-IL"));
-  setText("kpiMevazek", stats.mevazek.toLocaleString("he-IL"));
+  setText("kpiReal",     stats.realAlerts.toLocaleString("he-IL"));
+  setText("kpiMevazek",  stats.last7d.toLocaleString("he-IL"));
 
   const totalFired       = WEAPONS_DATA.totals.reduce((a, b) => a + b, 0);
   const totalIntercepted = WEAPONS_DATA.intercepted.reduce((a, b) => a + b, 0);
@@ -612,8 +366,8 @@ function updateKPIs(stats) {
   setText("kpiIntercepted",   totalIntercepted.toLocaleString("he-IL"));
   setText("kpiInterceptRate", `${interceptRate}%`);
 
-  const days = Math.floor((Date.now() - START_DATE) / 86_400_000);
-  setText("daysSince", `${days} ימים`);
+  const days = Math.floor((Date.now() - new Date(OP_START)) / 86_400_000);
+  setText("daysSince",  `${days} ימים`);
   setText("lastUpdate", new Date().toLocaleTimeString("he-IL"));
 }
 
@@ -643,15 +397,15 @@ const axisY = (extra = {}) => ({
   ...extra,
 });
 
-// ── Daily bars ──
+// ── Daily bars ──  (byDay = [{period,count}] from API or [[date,count]] legacy)
 function drawDaily(byDay) {
-  const values = byDay.map(([, v]) => v);
+  const values = byDay.map(e => Array.isArray(e) ? e[1] : e.count);
   const maxVal = Math.max(...values, 1);
 
   buildOrUpdate("chartDaily", {
     type: "bar",
     data: {
-      labels: byDay.map(([d]) => formatDateShort(d)),
+      labels: byDay.map(e => formatDateShort(Array.isArray(e) ? e[0] : e.period)),
       datasets: [{
         data: values,
         backgroundColor: values.map(v => `rgba(255,68,34,${0.3 + (v / maxVal) * 0.6})`),
@@ -663,7 +417,7 @@ function drawDaily(byDay) {
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: { tooltip: { callbacks: {
-        title: ([i]) => byDay[i.dataIndex]?.[0] ?? "",
+        title: ([i]) => { const e = byDay[i.dataIndex]; return e ? (Array.isArray(e) ? e[0] : e.period) : ""; },
         label: (i)   => ` ${i.raw.toLocaleString("he-IL")} אזעקות`,
       }}},
       scales: {
@@ -674,20 +428,23 @@ function drawDaily(byDay) {
   });
 }
 
-// ── Hourly line ──
-function drawHourly(byHour) {
+// ── Origins bar (replaces hourly) ──
+function drawOrigins(topOrigins) {
+  if (!topOrigins || topOrigins.length === 0) return;
+  const COLORS = { lebanon:"#ff8800", iran:"#cc00ff", gaza:"#ff4422", yemen:"#00ccff", fa:"#ffcc00" };
+  const labels = topOrigins.map(o => originLabel(o.origin));
+  const values = topOrigins.map(o => o.count);
+  const colors = topOrigins.map(o => (COLORS[o.origin] || "#888") + "cc");
+
   buildOrUpdate("chartHourly", {
-    type: "line",
+    type: "bar",
     data: {
-      labels: Array.from({ length: 24 }, (_, i) => `${i}:00`),
+      labels,
       datasets: [{
-        data: byHour,
-        borderColor:     "#00ccff",
-        backgroundColor: "rgba(0,204,255,0.1)",
-        borderWidth: 2,
-        pointRadius: 3,
-        pointBackgroundColor: "#00ccff",
-        fill: true, tension: 0.4,
+        data: values,
+        backgroundColor: colors,
+        borderColor:     colors.map(c => c.slice(0,7)),
+        borderWidth: 1, borderRadius: 4,
       }],
     },
     options: {
@@ -703,14 +460,16 @@ function drawHourly(byHour) {
 // ── Region distribution horizontal bar ──
 function drawRegions(topRegions) {
   if (!topRegions || topRegions.length === 0) return;
+  // Accept both [{zone,count}] (API) and [[zone,count]] (legacy)
+  const items = topRegions.map(r => Array.isArray(r) ? { zone: r[0], count: r[1] } : r);
   buildOrUpdate("chartRegions", {
     type: "bar",
     data: {
-      labels: topRegions.map(([r]) => r.replace(/^אזור\s+/, "")),
+      labels: items.map(r => r.zone.replace(/^אזור\s+/, "")),
       datasets: [{
-        data: topRegions.map(([, v]) => v),
-        backgroundColor: topRegions.map((_, i) =>
-          `hsla(${200 + (i / topRegions.length) * 120}, 70%, 55%, 0.75)`),
+        data: items.map(r => r.count),
+        backgroundColor: items.map((_, i) =>
+          `hsla(${200 + (i / items.length) * 120}, 70%, 55%, 0.75)`),
         borderRadius: 4,
       }],
     },
@@ -730,14 +489,16 @@ function drawRegions(topRegions) {
 
 // ── Top-15 areas horizontal bar ──
 function drawAreas(topAreas) {
+  // Accept both [{city,count}] (API) and [[city,count]] (legacy)
+  const items = topAreas.map(a => Array.isArray(a) ? { city: a[0], count: a[1] } : a);
   buildOrUpdate("chartAreas", {
     type: "bar",
     data: {
-      labels: topAreas.map(([a]) => a.length > 18 ? a.slice(0, 18) + "…" : a),
+      labels: items.map(a => a.city.length > 18 ? a.city.slice(0, 18) + "…" : a.city),
       datasets: [{
-        data: topAreas.map(([, v]) => v),
-        backgroundColor: topAreas.map((_, i) =>
-          `hsla(${15 + (i / topAreas.length) * 30}, 90%, 55%, 0.7)`),
+        data: items.map(a => a.count),
+        backgroundColor: items.map((_, i) =>
+          `hsla(${15 + (i / items.length) * 30}, 90%, 55%, 0.7)`),
         borderRadius: 4,
       }],
     },
@@ -755,27 +516,38 @@ function drawAreas(topAreas) {
   });
 }
 
-// ── Threat pills (HTML, not a canvas) ──
-function drawThreats(byCategory) {
-  const total = Object.values(byCategory).reduce((s, v) => s + v, 0) || 1;
+// ── Origin pills (HTML, not a canvas) ──
+const ORIGIN_META = {
+  lebanon: { emoji: "🇱🇧", color: "#ff8800" },
+  iran:    { emoji: "🇮🇷", color: "#cc00ff" },
+  gaza:    { emoji: "🇵🇸", color: "#ff4422" },
+  yemen:   { emoji: "🇾🇪", color: "#00ccff" },
+  fa:      { emoji: "🗡️",  color: "#ffcc00" },
+  hamas:   { emoji: "💣",  color: "#ff4422" },
+  isis:    { emoji: "☠️",  color: "#888888" },
+};
+function drawThreats(topOrigins) {
+  if (!topOrigins) return;
+  const total = topOrigins.reduce((s, o) => s + o.count, 0) || 1;
   const grid  = document.getElementById("threatGrid");
   grid.innerHTML = "";
 
-  Object.entries(byCategory)
-    .sort(([, a],[, b]) => b - a)
-    .forEach(([cat, count]) => {
-      const info = CATEGORY_MAP[cat] ?? { name: `קטגוריה ${cat}`, color: "#888", emoji: "⚠️" };
+  topOrigins
+    .slice()
+    .sort((a, b) => b.count - a.count)
+    .forEach(({ origin, count }) => {
+      const meta = ORIGIN_META[origin] ?? { emoji: "⚠️", color: "#888" };
       const pct  = Math.round((count / total) * 100);
 
       const pill = document.createElement("div");
-      pill.className   = "threat-pill";
+      pill.className = "threat-pill";
       pill.setAttribute("role", "listitem");
       pill.innerHTML = `
         <div>
-          <div class="threat-emoji" aria-hidden="true">${info.emoji}</div>
-          <div class="threat-name">${info.name}</div>
+          <div class="threat-emoji" aria-hidden="true">${meta.emoji}</div>
+          <div class="threat-name">${originLabel(origin)}</div>
           <div class="threat-bar-wrap">
-            <div class="threat-bar" style="width:${pct}%;background:${info.color}"></div>
+            <div class="threat-bar" style="width:${pct}%;background:${meta.color}"></div>
           </div>
         </div>
         <div>
@@ -874,25 +646,22 @@ function drawCasualties() {
   });
 }
 
-// ── Alert types doughnut ──
-function drawAlertTypes(byCategory) {
-  const groups = [
-    { label: "ירי ממשי (טיל / כטב\"מ)", cats: [1, 2, 6, 14], color: "#ff4422" },
-    { label: "אזהרה מוקדמת",             cats: [13],           color: "#ffcc00" },
-    { label: "הרשאת יציאה",              cats: [101],          color: "#00ff88" },
-  ];
-
-  const values = groups.map(g => g.cats.reduce((s, c) => s + (byCategory[c] || 0), 0));
-  const total  = values.reduce((a, b) => a + b, 0) || 1;
+// ── Origins doughnut ──
+function drawAlertTypes(topOrigins) {
+  if (!topOrigins || topOrigins.length === 0) return;
+  const total = topOrigins.reduce((s, o) => s + o.count, 0) || 1;
+  const labels = topOrigins.map(o => originLabel(o.origin));
+  const values = topOrigins.map(o => o.count);
+  const colors = topOrigins.map(o => (ORIGIN_META[o.origin]?.color || "#888"));
 
   buildOrUpdate("chartAlertTypes", {
     type: "doughnut",
     data: {
-      labels: groups.map(g => g.label),
+      labels,
       datasets: [{
         data:            values,
-        backgroundColor: groups.map(g => g.color + "cc"),
-        borderColor:     groups.map(g => g.color),
+        backgroundColor: colors.map(c => c + "cc"),
+        borderColor:     colors,
         borderWidth:     2,
         hoverOffset:     8,
       }],
@@ -902,8 +671,7 @@ function drawAlertTypes(byCategory) {
       cutout: "62%",
       plugins: {
         legend: {
-          display: true,
-          position: "bottom",
+          display: true, position: "bottom",
           labels: { color: "rgba(255,255,255,0.6)", font: { size: 11 }, padding: 14, boxWidth: 12 },
         },
         tooltip: { callbacks: {
@@ -964,21 +732,16 @@ function drawInterceptions() {
 // ═══════════════════════════════════════════════
 // MAIN REFRESH
 // ═══════════════════════════════════════════════
-function applyFilter() {
-  let filtered = allAlerts;
-  if (filterFrom) filtered = filtered.filter(a => { const d = parseAlertDate(a.alertDate); return d && d >= filterFrom; });
-  if (filterTo)   filtered = filtered.filter(a => { const d = parseAlertDate(a.alertDate); return d && d <= filterTo; });
-
-  const stats = processAlerts(filtered);
+function renderStats(stats) {
   updateKPIs(stats);
   drawDaily(stats.byDay);
-  drawHourly(stats.byHour);
-  drawAreas(stats.topAreas);
-  drawRegions(stats.topRegions);
-  drawThreats(stats.byCategory);
+  drawOrigins(stats.topOrigins);
+  drawAreas(stats.topCities);
+  drawRegions(stats.topZones);
+  drawThreats(stats.topOrigins);
   drawWeapons();
   drawCasualties();
-  drawAlertTypes(stats.byCategory);
+  drawAlertTypes(stats.topOrigins);
   drawInterceptions();
 }
 
@@ -986,7 +749,6 @@ function showConnectionError() {
   setSourceBadge("demo", "● NO DATA");
   showBanner("bannerError");
   hideBanner("bannerProxy");
-  // Reset dynamic KPIs to dashes so nothing misleading is shown
   ["kpiTotal","kpiToday","kpiTodayDate","kpiPeak","kpiPeakDate",
    "kpiAreas","kpiAvg","kpiReal","kpiMevazek"].forEach(id => setText(id, "—"));
 }
@@ -994,23 +756,16 @@ function showConnectionError() {
 async function refresh() {
   try {
     hideBanner("bannerError");
-    const fresh = await fetchAlerts();
-    allAlerts = mergeIntoCache(fresh); // merge new records into growing history
-    applyFilter();
+    const api   = await fetchStats(currentStartDate, currentEndDate);
+    const stats = buildStats(api);
+    renderStats(stats);
+    setSourceBadge("live", "● LIVE · RedAlert API");
+    hideBanner("bannerProxy");
     resetCountdown();
+    console.log(`[OREF] RedAlert OK — ${stats.total} events since ${currentStartDate}`);
   } catch (err) {
     console.error("Refresh error:", err);
-    // Fall back to whatever we have cached rather than showing nothing
-    const cached = getCachedAlerts();
-    if (cached.length > 0) {
-      console.warn(`[cache] Live fetch failed — showing ${cached.length} cached records`);
-      allAlerts = cached;
-      applyFilter();
-      setSourceBadge("proxy", "● CACHED DATA");
-      resetCountdown();
-    } else {
-      showConnectionError();
-    }
+    showConnectionError();
   }
 }
 
@@ -1078,7 +833,7 @@ function hideLoader() {
 }
 
 window.addEventListener("load", async () => {
-  // ── Date filter button wiring ──
+  // ── Date filter button wiring (each change triggers a new API call) ──
   document.querySelectorAll(".filter-btn[data-range]").forEach(btn => {
     btn.addEventListener("click", () => {
       document.querySelectorAll(".filter-btn[data-range]").forEach(b => b.classList.remove("active"));
@@ -1092,21 +847,23 @@ window.addEventListener("load", async () => {
       }
       customDiv.style.display = "none";
       if (range === "all") {
-        filterFrom = null; filterTo = null;
+        currentStartDate = OP_START;
+        currentEndDate   = "";
       } else {
-        filterFrom = new Date(Date.now() - parseInt(range, 10) * 86_400_000);
-        filterTo   = null;
+        const d = new Date(Date.now() - parseInt(range, 10) * 86_400_000);
+        currentStartDate = d.toISOString().replace(".000","");
+        currentEndDate   = "";
       }
-      if (allAlerts.length) applyFilter();
+      refresh();
     });
   });
 
   document.getElementById("applyCustomRange").addEventListener("click", () => {
     const fromVal = document.getElementById("filterFrom").value;
     const toVal   = document.getElementById("filterTo").value;
-    filterFrom = fromVal ? new Date(fromVal)               : null;
-    filterTo   = toVal   ? new Date(toVal + "T23:59:59")   : null;
-    if (allAlerts.length) applyFilter();
+    currentStartDate = fromVal ? fromVal + "T00:00:00Z" : OP_START;
+    currentEndDate   = toVal   ? toVal   + "T23:59:59Z" : "";
+    refresh();
   });
 
   // Warn users opening the file directly from disk (Origin: null breaks most proxies)

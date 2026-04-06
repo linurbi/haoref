@@ -1,36 +1,14 @@
 /**
- * Cloudflare Worker — OREF alert history proxy
- * Uses legacy "Service Worker" syntax (works with the default Cloudflare editor)
- *
- * Tries multiple URL strategies to get the most complete history possible.
+ * Cloudflare Worker — RedAlert Statistics API proxy
+ * Requires REDALERT_KEY secret binding set in Worker Settings → Variables and Secrets
  */
 
-// ── GitHub repo data branch — source of historical alert data ──
-var DATA_BASE = "https://raw.githubusercontent.com/linurbi/haoref/data";
+const REDALERT_BASE = "https://redalert.orielhaim.com";
+const OP_START      = "2026-02-28T00:00:00Z";  // Operation start date
 
-addEventListener("fetch", function (event) {
+addEventListener("fetch", function(event) {
   event.respondWith(handleRequest(event.request));
 });
-
-var HEADERS = {
-  "Referer":           "https://www.oref.org.il/",
-  "X-Requested-With":  "XMLHttpRequest",
-  "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-  "Accept":            "application/json, text/javascript, */*; q=0.01",
-  "Accept-Language":   "he-IL,he;q=0.9,en-US;q=0.8",
-};
-
-async function orefFetch(url) {
-  var resp = await fetch(url, { headers: HEADERS });
-  var body = await resp.text();
-  // Reject Akamai "Access Denied" HTML
-  if (body.includes("<HTML>") || body.includes("Access Denied")) {
-    throw new Error("blocked: " + resp.status);
-  }
-  return { status: resp.status, body: body };
-}
 
 async function handleRequest(request) {
   if (request.method === "OPTIONS") {
@@ -43,92 +21,45 @@ async function handleRequest(request) {
     });
   }
 
-  var url          = new URL(request.url);
-  var fromDateParam = url.searchParams.get("fromDate"); // e.g. "02.04.2026" (DD.MM.YYYY)
+  var url       = new URL(request.url);
+  var startDate = url.searchParams.get("startDate") || OP_START;
+  var endDate   = url.searchParams.get("endDate")   || "";
 
-  var errors = [];
+  var apiUrl = REDALERT_BASE + "/api/stats/summary"
+    + "?startDate=" + encodeURIComponent(startDate)
+    + (endDate ? "&endDate=" + encodeURIComponent(endDate) : "")
+    + "&include=topCities,topZones,topOrigins,timeline,peak"
+    + "&timelineGroup=day"
+    + "&topLimit=15";
 
-  // ── Strategy 0: GitHub repo data branch (no size limits) ────────────────────
-  if (!fromDateParam) {
-    try {
-      var t = Date.now();
-      var r1 = await fetch(DATA_BASE + "/oref_history_1.json?t=" + t, { cf: { cacheEverything: false } });
-      var r2 = await fetch(DATA_BASE + "/oref_history_2.json?t=" + t, { cf: { cacheEverything: false } });
-      var d1 = r1.ok ? JSON.parse(await r1.text()) : [];
-      var d2 = r2.ok ? JSON.parse(await r2.text()) : [];
-      var combined = (Array.isArray(d1) ? d1 : []).concat(Array.isArray(d2) ? d2 : []);
-      if (combined.length > 0) {
-        return new Response(JSON.stringify(combined), {
-          status: 200,
-          headers: corsHeaders("repo:" + combined.length),
-        });
-      }
-    } catch (e) { errors.push("repo: " + e.message); }
+  try {
+    var resp = await fetch(apiUrl, {
+      headers: {
+        "Authorization": "Bearer " + REDALERT_KEY,
+        "Accept":        "application/json",
+      },
+      cf: { cacheEverything: false },
+    });
+
+    if (!resp.ok) throw new Error("RedAlert API returned " + resp.status);
+    var body = await resp.text();
+
+    return new Response(body, {
+      status: 200,
+      headers: {
+        "Content-Type":                "application/json; charset=utf-8",
+        "Access-Control-Allow-Origin": "*",
+        "Cache-Control":               "max-age=60, s-maxage=60",
+        "X-Oref-Source":               "redalert",
+      },
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: e.message }), {
+      status: 503,
+      headers: {
+        "Content-Type":                "application/json",
+        "Access-Control-Allow-Origin": "*",
+      },
+    });
   }
-
-  // ── Strategy 1: AlertsHistory with date range ─────────────────────────────
-  try {
-    var today   = new Date();
-    var dd      = String(today.getDate()).padStart(2, "0");
-    var mm      = String(today.getMonth() + 1).padStart(2, "0");
-    var yyyy    = today.getFullYear();
-    var toDate  = dd + "." + mm + "." + yyyy;
-    var fromDate = fromDateParam || "28.02.2026"; // caller can override start date
-
-    var rangeUrl = "https://www.oref.org.il/warningMessages/alert/History/AlertsHistory.json" +
-                   "?fromDate=" + fromDate + "&toDate=" + toDate;
-
-    var r1 = await orefFetch(rangeUrl);
-    var parsed1 = JSON.parse(r1.body);
-    if (Array.isArray(parsed1) && parsed1.length > 0) {
-      return new Response(r1.body, {
-        status: 200,
-        headers: corsHeaders("range:" + parsed1.length),
-      });
-    }
-  } catch (e) { errors.push("range: " + e.message); }
-
-  // ── Strategy 2: Plain AlertsHistory (rolling recent window) ─────────────────
-  try {
-    var r2 = await orefFetch(
-      "https://www.oref.org.il/warningMessages/alert/History/AlertsHistory.json"
-    );
-    if (r2.body && r2.body.trim().startsWith("[")) {
-      return new Response(r2.body, {
-        status: 200,
-        headers: corsHeaders("plain"),
-      });
-    }
-  } catch (e) { errors.push("plain: " + e.message); }
-
-  // ── Strategy 3: Alternate capitalisation path ────────────────────────────────
-  try {
-    var r3 = await orefFetch(
-      "https://www.oref.org.il/WarningMessages/History/AlertsHistory.json"
-    );
-    if (r3.body && r3.body.trim().startsWith("[")) {
-      return new Response(r3.body, {
-        status: 200,
-        headers: corsHeaders("alt"),
-      });
-    }
-  } catch (e) { errors.push("alt: " + e.message); }
-
-  // All failed
-  return new Response(JSON.stringify({ error: "all strategies failed", details: errors }), {
-    status: 503,
-    headers: {
-      "Content-Type":                "application/json",
-      "Access-Control-Allow-Origin": "*",
-    },
-  });
-}
-
-function corsHeaders(source) {
-  return {
-    "Content-Type":                "application/json; charset=utf-8",
-    "Access-Control-Allow-Origin": "*",
-    "Cache-Control":               "no-cache, no-store",
-    "X-Oref-Source":               source,
-  };
 }
