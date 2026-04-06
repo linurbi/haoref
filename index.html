@@ -564,10 +564,28 @@ function drawOrigins(topOrigins) {
 }
 
 // ── Region distribution horizontal bar ──
+// Zones the API splits that all belong to the northern front
+const NORTH_ZONES = ["קו העימות", "גליל עליון", "גליל תחתון"];
+
+function mergeNorthZones(raw) {
+  let northTotal = 0;
+  const rest = [];
+  for (const item of raw) {
+    if (NORTH_ZONES.includes(item.zone)) {
+      northTotal += item.count;
+    } else {
+      rest.push(item);
+    }
+  }
+  if (northTotal > 0) rest.push({ zone: "צפון (קו העימות)", count: northTotal });
+  return rest.sort((a, b) => b.count - a.count);
+}
+
 function drawRegions(topRegions) {
   if (!topRegions || topRegions.length === 0) return;
   // Accept both [{zone,count}] (API) and [[zone,count]] (legacy)
-  const items = topRegions.map(r => Array.isArray(r) ? { zone: r[0], count: r[1] } : r);
+  const raw   = topRegions.map(r => Array.isArray(r) ? { zone: r[0], count: r[1] } : r);
+  const items = mergeNorthZones(raw);
   buildOrUpdate("chartRegions", {
     type: "bar",
     data: {
