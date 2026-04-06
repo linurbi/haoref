@@ -293,13 +293,13 @@ function originLabel(o) { return ORIGIN_LABELS[o] || o; }
 
 // ── Origin card colors ────────────────────────────────────────────────────────
 const ORIGIN_CARD_COLORS = {
-  lebanon: "#00ff7a",
-  iran:    "#be00ff",
-  gaza:    "#ff2244",
-  yemen:   "#ffaa22",
-  fa:      "#ffdd00",
-  hamas:   "#ff2244",
-  isis:    "#666666",
+  lebanon: "#00ffaa",
+  iran:    "#cc44ff",
+  gaza:    "#ff2255",
+  yemen:   "#ffcc00",
+  fa:      "#ff8800",
+  hamas:   "#ff2255",
+  isis:    "#666688",
 };
 
 // ── Draw hero origin cards ────────────────────────────────────────────────────
@@ -344,9 +344,9 @@ let currentStartDate = OP_START;
 let currentEndDate   = "";
 
 
-// ── Chart.js dark-theme defaults ──
-Chart.defaults.color          = "rgba(255,255,255,0.5)";
-Chart.defaults.borderColor    = "rgba(255,255,255,0.06)";
+// ── Chart.js navy-theme defaults ──
+Chart.defaults.color          = "rgba(170,185,255,0.55)";
+Chart.defaults.borderColor    = "rgba(70,110,255,0.1)";
 Chart.defaults.font.family    = "'Heebo', sans-serif";
 Chart.defaults.plugins.legend.display = false;
 
@@ -484,8 +484,8 @@ function drawDaily(byDay) {
       labels: byDay.map(e => formatDateShort(Array.isArray(e) ? e[0] : e.period)),
       datasets: [{
         data: values,
-        backgroundColor: values.map(v => `rgba(255,68,34,${0.3 + (v / maxVal) * 0.6})`),
-        borderColor:    "rgba(255,68,34,0.8)",
+        backgroundColor: values.map(v => `rgba(68,119,255,${0.25 + (v / maxVal) * 0.65})`),
+        borderColor:    "rgba(100,150,255,0.7)",
         borderWidth: 1,
         borderRadius: 3,
       }],
@@ -507,7 +507,7 @@ function drawDaily(byDay) {
 // ── Origins bar (replaces hourly) ──
 function drawOrigins(topOrigins) {
   if (!topOrigins || topOrigins.length === 0) return;
-  const COLORS = { lebanon:"#ff8800", iran:"#cc00ff", gaza:"#ff4422", yemen:"#00ccff", fa:"#ffcc00" };
+  const COLORS = { lebanon:"#00ffaa", iran:"#cc44ff", gaza:"#ff2255", yemen:"#ffcc00", fa:"#ff8800" };
   const labels = topOrigins.map(o => originLabel(o.origin));
   const values = topOrigins.map(o => o.count);
   const colors = topOrigins.map(o => (COLORS[o.origin] || "#888") + "cc");
@@ -594,13 +594,13 @@ function drawAreas(topAreas) {
 
 // ── Origin pills (HTML, not a canvas) ──
 const ORIGIN_META = {
-  lebanon: { emoji: "🇱🇧", color: "#ff8800" },
-  iran:    { emoji: "🇮🇷", color: "#cc00ff" },
-  gaza:    { emoji: "🇵🇸", color: "#ff4422" },
-  yemen:   { emoji: "🇾🇪", color: "#00ccff" },
-  fa:      { emoji: "🗡️",  color: "#ffcc00" },
-  hamas:   { emoji: "💣",  color: "#ff4422" },
-  isis:    { emoji: "☠️",  color: "#888888" },
+  lebanon: { emoji: "🇱🇧", color: "#00ffaa" },
+  iran:    { emoji: "🇮🇷", color: "#cc44ff" },
+  gaza:    { emoji: "🇵🇸", color: "#ff2255" },
+  yemen:   { emoji: "🇾🇪", color: "#ffcc00" },
+  fa:      { emoji: "🗡️",  color: "#ff8800"  },
+  hamas:   { emoji: "💣",  color: "#ff2255" },
+  isis:    { emoji: "☠️",  color: "#666688" },
 };
 function drawThreats(topOrigins) {
   if (!topOrigins) return;
