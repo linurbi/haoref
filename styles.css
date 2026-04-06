@@ -332,6 +332,12 @@ main { padding:28px 40px; max-width:1640px; margin:0 auto; }
   color:var(--text-dim); text-transform:uppercase; margin-bottom:18px;
   display:flex; align-items:center; gap:10px;
 }
+.card-title .card-unit {
+  font-family: 'Heebo', sans-serif;
+  font-size: 10px; font-weight: 400; letter-spacing: 0.5px;
+  color: rgba(255,255,255,0.35); text-transform: none;
+  margin-right: auto;
+}
 .card-title .dot {
   width:6px; height:6px; border-radius:50%;
   background:var(--c1); box-shadow:0 0 8px var(--c1); flex-shrink:0;
