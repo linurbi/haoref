@@ -26,6 +26,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>מבצע שאגת הארי — מעקב אזעקות בזמן אמת</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚨</text></svg>">
 <meta name="description" content="מעקב אזעקות פיקוד עורף בזמן אמת מאז מבצע שאגת הארי — טילים, כטב״מים, פילוח לפי אזור ושעה.">
 
 <!-- OpenGraph / social preview -->
@@ -550,12 +551,6 @@ function updateKPIs(stats) {
 
   setText("kpiCityHits", stats.uniqueAreas.toLocaleString("he-IL") + " יישובים ייחודיים");
   setText("kpiPeakDate", formatDate(stats.peakDay[0]));
-
-  const totalFired       = WEAPONS_DATA.totals.reduce((a, b) => a + b, 0);
-  const totalIntercepted = WEAPONS_DATA.intercepted.reduce((a, b) => a + b, 0);
-  const interceptRate    = Math.round((totalIntercepted / totalFired) * 100);
-  anim("kpiIntercepted", totalIntercepted);
-  setText("kpiInterceptRate", `${interceptRate}%`);
 
   const days = Math.floor((Date.now() - new Date(OP_START)) / 86_400_000);
   setText("daysSince",  `${days} ימים`);
