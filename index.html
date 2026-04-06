@@ -123,53 +123,63 @@
     </div>
   </div>
 
-  <!-- KPI cards -->
-  <section class="kpi-grid" aria-label="נתוני מפתח">
-    <div class="kpi red">
-      <div class="kpi-label">סה"כ אירועי אזעקה</div>
-      <div class="kpi-value" id="kpiTotal">—</div>
-      <div class="kpi-sub" id="kpiCityHits">— פגיעות יישובים</div>
+  <!-- Hero KPI Strip -->
+  <section class="kpi-hero" aria-label="מדדים ראשיים">
+    <div class="kpi-hero-cell">
+      <div class="kpi-hero-label">סה"כ אירועי אזעקה · מתחילת המבצע</div>
+      <div class="kpi-hero-value" id="kpiTotal">—</div>
+      <div class="kpi-hero-sub" id="kpiCityHits">— יישובים ייחודיים</div>
     </div>
-    <div class="kpi orange">
-      <div class="kpi-label">אזעקות היום</div>
-      <div class="kpi-value" id="kpiToday">—</div>
-      <div class="kpi-sub" id="kpiTodayDate">—</div>
+    <div class="kpi-hero-cell">
+      <div class="kpi-hero-label">אזעקות היום</div>
+      <div class="kpi-hero-value" id="kpiToday">—</div>
+      <div class="kpi-hero-sub" id="kpiTodayDate">24 שעות אחרונות</div>
     </div>
-    <div class="kpi yellow">
-      <div class="kpi-label">שיא יומי</div>
-      <div class="kpi-value" id="kpiPeak">—</div>
-      <div class="kpi-sub" id="kpiPeakDate">—</div>
+    <div class="kpi-hero-cell">
+      <div class="kpi-hero-label">שיא יומי</div>
+      <div class="kpi-hero-value" id="kpiPeak">—</div>
+      <div class="kpi-hero-sub" id="kpiPeakDate">—</div>
     </div>
-    <div class="kpi cyan">
-      <div class="kpi-label">יישובים שהותקפו</div>
-      <div class="kpi-value" id="kpiAreas">—</div>
-      <div class="kpi-sub">אזורים ייחודיים</div>
+    <div class="kpi-hero-cell">
+      <div class="kpi-hero-label">יישובים שהותקפו</div>
+      <div class="kpi-hero-value" id="kpiAreas">—</div>
+      <div class="kpi-hero-sub">אזורים ייחודיים</div>
     </div>
-    <div class="kpi green">
-      <div class="kpi-label">ממוצע יומי</div>
-      <div class="kpi-value" id="kpiAvg">—</div>
-      <div class="kpi-sub">אזעקות ליום</div>
+    <div class="kpi-hero-cell">
+      <div class="kpi-hero-label">ממוצע יומי</div>
+      <div class="kpi-hero-value" id="kpiAvg">—</div>
+      <div class="kpi-hero-sub">אזעקות ליום</div>
     </div>
-    <div class="kpi purple">
-      <div class="kpi-label">כטב״מ / בליסטי</div>
+  </section>
+
+  <!-- Secondary KPI row -->
+  <div class="kpi-row" aria-label="מדדים משניים">
+    <div class="kpi-card">
+      <div class="kpi-label">כטב"מ · בליסטי (תימן · איראן)</div>
       <div class="kpi-value" id="kpiReal">—</div>
-      <div class="kpi-sub">אירועים (תימן · איראן)</div>
+      <div class="kpi-sub">אירועים בליסטיים</div>
     </div>
-    <div class="kpi orange">
-      <div class="kpi-label">אזעקות 7 ימים</div>
+    <div class="kpi-card">
+      <div class="kpi-label">7 ימים אחרונים</div>
       <div class="kpi-value" id="kpiMevazek">—</div>
-      <div class="kpi-sub">7 ימים אחרונים</div>
+      <div class="kpi-sub">אזעקות בשבוע</div>
     </div>
-    <div class="kpi cyan">
-      <div class="kpi-label">סה"כ יירוטים</div>
+    <div class="kpi-card">
+      <div class="kpi-label">סה"כ יירוטים (צה"ל)</div>
       <div class="kpi-value" id="kpiIntercepted">—</div>
       <div class="kpi-sub">מכלל השיגורים</div>
     </div>
-    <div class="kpi green">
+    <div class="kpi-card">
       <div class="kpi-label">אחוז יירוט</div>
       <div class="kpi-value" id="kpiInterceptRate">—</div>
       <div class="kpi-sub">ממוצע כלל הסוגים</div>
     </div>
+  </div>
+
+  <!-- Origins Hero Cards -->
+  <section class="origins-section" aria-label="מקורות שיגור">
+    <div class="section-title">מקורות שיגור</div>
+    <div class="origins-grid" id="originsGrid"></div>
   </section>
 
   <!-- Row 1: Daily timeline + Hourly distribution -->
@@ -184,17 +194,11 @@
     </div>
   </div>
 
-  <!-- Row 2: Top areas + Threat types + Region distribution -->
-  <div class="charts-grid three">
+  <!-- Row 2: Top cities + Region distribution -->
+  <div class="charts-grid">
     <div class="chart-card">
       <div class="card-title"><div class="dot" aria-hidden="true"></div>יישובים מותקפים ביותר — Top 15</div>
       <div class="chart-wrap tall"><canvas id="chartAreas" aria-label="גרף יישובים מותקפים ביותר"></canvas></div>
-    </div>
-    <div class="chart-card">
-      <div class="card-title"><div class="dot" aria-hidden="true"></div>מקורות שיגור</div>
-      <div class="chart-wrap scroll">
-        <div class="threat-grid" id="threatGrid" role="list" aria-label="מקורות שיגור"></div>
-      </div>
     </div>
     <div class="chart-card">
       <div class="card-title"><div class="dot" aria-hidden="true"></div>התפלגות לפי אזור</div>
@@ -214,15 +218,23 @@
     </div>
   </div>
 
-  <!-- Row 4: Alert types + Interception breakdown -->
-  <div class="charts-grid">
-    <div class="chart-card">
-      <div class="card-title"><div class="dot" aria-hidden="true"></div>מקורות שיגור — התפלגות</div>
-      <div class="chart-wrap"><canvas id="chartAlertTypes" aria-label="גרף סוגי אזעקות"></canvas></div>
+  <!-- Row 4: Origins doughnut + Interception breakdown + Origin detail pills -->
+  <div class="charts-grid three">
+    <div class="charts-grid" style="margin:0; gap:var(--gap);">
+      <div class="chart-card">
+        <div class="card-title"><div class="dot" aria-hidden="true"></div>מקורות שיגור — התפלגות</div>
+        <div class="chart-wrap"><canvas id="chartAlertTypes" aria-label="גרף מקורות שיגור"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="card-title"><div class="dot" aria-hidden="true"></div>יירוטים לפי סוג נשק (מצטבר)</div>
+        <div class="chart-wrap"><canvas id="chartInterceptions" aria-label="גרף יירוטים לפי נשק"></canvas></div>
+      </div>
     </div>
     <div class="chart-card">
-      <div class="card-title"><div class="dot" aria-hidden="true"></div>יירוטים לפי סוג נשק (מצטבר)</div>
-      <div class="chart-wrap"><canvas id="chartInterceptions" aria-label="גרף יירוטים לפי נשק"></canvas></div>
+      <div class="card-title"><div class="dot" aria-hidden="true"></div>פירוט מקורות</div>
+      <div class="chart-wrap scroll">
+        <div class="threat-grid" id="threatGrid" role="list" aria-label="פירוט מקורות שיגור"></div>
+      </div>
     </div>
   </div>
 
@@ -253,6 +265,20 @@ async function fetchStats(startDate, endDate) {
   return data;
 }
 
+// ── Animated counter ─────────────────────────────────────────────────────────
+function countUp(el, target, duration = 1400) {
+  if (!el || isNaN(target)) return;
+  const start = parseInt(el.textContent.replace(/\D/g, "")) || 0;
+  const startTime = performance.now();
+  const step = (now) => {
+    const t = Math.min((now - startTime) / duration, 1);
+    const eased = 1 - Math.pow(1 - t, 3); // cubic ease-out
+    el.textContent = Math.round(start + (target - start) * eased).toLocaleString("he-IL");
+    if (t < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
 // ── Origin → Hebrew label map ─────────────────────────────────────────────────
 const ORIGIN_LABELS = {
   lebanon: "לבנון (חיזבאללה)",
@@ -264,6 +290,54 @@ const ORIGIN_LABELS = {
   isis:    "דאעש",
 };
 function originLabel(o) { return ORIGIN_LABELS[o] || o; }
+
+// ── Origin card colors ────────────────────────────────────────────────────────
+const ORIGIN_CARD_COLORS = {
+  lebanon: "#00ff7a",
+  iran:    "#be00ff",
+  gaza:    "#ff2244",
+  yemen:   "#ffaa22",
+  fa:      "#ffdd00",
+  hamas:   "#ff2244",
+  isis:    "#666666",
+};
+
+// ── Draw hero origin cards ────────────────────────────────────────────────────
+function drawOriginCards(topOrigins) {
+  const grid = document.getElementById("originsGrid");
+  if (!grid || !topOrigins || topOrigins.length === 0) return;
+
+  const total = topOrigins.reduce((s, o) => s + o.count, 0) || 1;
+
+  grid.innerHTML = topOrigins
+    .slice()
+    .sort((a, b) => b.count - a.count)
+    .map(({ origin, count }) => {
+      const color = ORIGIN_CARD_COLORS[origin] || "#888888";
+      const pct   = Math.round((count / total) * 100);
+      const flag  = ORIGIN_META[origin]?.emoji || "⚠️";
+      return `
+        <div class="origin-card" style="--origin-color:${color}">
+          <div class="origin-flag">${flag}</div>
+          <div class="origin-name">${originLabel(origin)}</div>
+          <div class="origin-count" data-target="${count}">${count.toLocaleString("he-IL")}</div>
+          <div class="origin-pct">${pct}% מסה"כ</div>
+          <div class="origin-bar"><div class="origin-bar-fill" style="width:0%"></div></div>
+        </div>`;
+    })
+    .join("");
+
+  // Trigger bar animations and count-up in next frame
+  requestAnimationFrame(() => {
+    grid.querySelectorAll(".origin-bar-fill").forEach((bar, i) => {
+      const pct = topOrigins.slice().sort((a,b)=>b.count-a.count)[i];
+      if (pct) bar.style.width = Math.round((pct.count / total) * 100) + "%";
+    });
+    grid.querySelectorAll(".origin-count[data-target]").forEach(el => {
+      countUp(el, parseInt(el.dataset.target), 1600);
+    });
+  });
+}
 
 // ── Active filter state ───────────────────────────────────────────────────────
 let currentStartDate = OP_START;
@@ -349,21 +423,23 @@ function buildStats(api) {
 // KPIs
 // ═══════════════════════════════════════════════
 function updateKPIs(stats) {
-  setText("kpiTotal",    stats.total.toLocaleString("he-IL"));
+  const anim = (id, val) => countUp(document.getElementById(id), val);
+
+  anim("kpiTotal",  stats.total);
+  anim("kpiToday",  stats.today);
+  anim("kpiPeak",   stats.peakDay[1]);
+  anim("kpiAreas",  stats.uniqueAreas);
+  anim("kpiAvg",    stats.avgPerDay);
+  anim("kpiReal",   stats.realAlerts);
+  anim("kpiMevazek",stats.last7d);
+
   setText("kpiCityHits", stats.uniqueAreas.toLocaleString("he-IL") + " יישובים ייחודיים");
-  setText("kpiToday",    stats.today.toLocaleString("he-IL"));
-  setText("kpiTodayDate","24 שעות אחרונות");
-  setText("kpiPeak",     stats.peakDay[1].toLocaleString("he-IL"));
   setText("kpiPeakDate", formatDate(stats.peakDay[0]));
-  setText("kpiAreas",    stats.uniqueAreas.toLocaleString("he-IL"));
-  setText("kpiAvg",      stats.avgPerDay.toLocaleString("he-IL"));
-  setText("kpiReal",     stats.realAlerts.toLocaleString("he-IL"));
-  setText("kpiMevazek",  stats.last7d.toLocaleString("he-IL"));
 
   const totalFired       = WEAPONS_DATA.totals.reduce((a, b) => a + b, 0);
   const totalIntercepted = WEAPONS_DATA.intercepted.reduce((a, b) => a + b, 0);
   const interceptRate    = Math.round((totalIntercepted / totalFired) * 100);
-  setText("kpiIntercepted",   totalIntercepted.toLocaleString("he-IL"));
+  anim("kpiIntercepted", totalIntercepted);
   setText("kpiInterceptRate", `${interceptRate}%`);
 
   const days = Math.floor((Date.now() - new Date(OP_START)) / 86_400_000);
@@ -734,6 +810,7 @@ function drawInterceptions() {
 // ═══════════════════════════════════════════════
 function renderStats(stats) {
   updateKPIs(stats);
+  drawOriginCards(stats.topOrigins);
   drawDaily(stats.byDay);
   drawOrigins(stats.topOrigins);
   drawAreas(stats.topCities);
