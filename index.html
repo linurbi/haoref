@@ -174,14 +174,14 @@
         <div class="kpi-sub">מאז 28.02.2026</div>
       </div>
       <div class="kpi-cell c9">
-        <div class="kpi-lbl">יירוטים (צה"ל)</div>
-        <div class="kpi-num" id="kpiIntercepted">—</div>
-        <div class="kpi-sub">מכלל השיגורים</div>
+        <div class="kpi-lbl">אזורים מוכים</div>
+        <div class="kpi-num" id="kpiZones">—</div>
+        <div class="kpi-sub">אזורים ייחודיים</div>
       </div>
       <div class="kpi-cell c10">
-        <div class="kpi-lbl">אחוז יירוט</div>
-        <div class="kpi-num" id="kpiInterceptRate">—</div>
-        <div class="kpi-sub">ממוצע כלל הסוגים</div>
+        <div class="kpi-lbl">30 ימים אחרונים</div>
+        <div class="kpi-num" id="kpiLast30">—</div>
+        <div class="kpi-sub">אזעקות בחודש</div>
       </div>
     </div>
 
@@ -223,19 +223,19 @@
     <div class="cas-grid" id="casGrid" role="list" aria-label="נפגעים לפי חומרה"></div>
   </div>
 
-  <!-- Row 4: Weapons + Casualties over time -->
+  <!-- Row 4: Origins bar + Casualties severity -->
   <div class="charts-grid">
     <div class="chart-card">
-      <div class="card-title"><div class="dot" aria-hidden="true"></div>טילים וכטב"מים — דיווחי צה"ל</div>
-      <div class="chart-wrap"><canvas id="chartWeapons" aria-label="גרף טילים וכטב״מים"></canvas></div>
+      <div class="card-title"><div class="dot" aria-hidden="true"></div>אזעקות לפי מקור שיגור</div>
+      <div class="chart-wrap"><canvas id="chartWeapons" aria-label="גרף אזעקות לפי מקור"></canvas></div>
     </div>
     <div class="chart-card">
-      <div class="card-title"><div class="dot" aria-hidden="true"></div>נפגעים לאורך זמן</div>
-      <div class="chart-wrap"><canvas id="chartCasualties" aria-label="גרף נפגעים לאורך זמן"></canvas></div>
+      <div class="card-title"><div class="dot" aria-hidden="true"></div>נפגעים לפי חומרה — שאגת הארי <span class="card-unit">(משרד הבריאות)</span></div>
+      <div class="chart-wrap"><canvas id="chartCasualties" aria-label="גרף נפגעים לפי חומרה"></canvas></div>
     </div>
   </div>
 
-  <!-- Row 4: Origins doughnut + Interception breakdown + Origin detail pills -->
+  <!-- Row 5: Origins doughnut + 7-day trend + Origin detail pills -->
   <div class="charts-grid three">
     <div class="charts-grid" style="margin:0; gap:var(--gap);">
       <div class="chart-card">
@@ -243,8 +243,8 @@
         <div class="chart-wrap"><canvas id="chartAlertTypes" aria-label="גרף מקורות שיגור"></canvas></div>
       </div>
       <div class="chart-card">
-        <div class="card-title"><div class="dot" aria-hidden="true"></div>יירוטים לפי סוג נשק (מצטבר)</div>
-        <div class="chart-wrap"><canvas id="chartInterceptions" aria-label="גרף יירוטים לפי נשק"></canvas></div>
+        <div class="card-title"><div class="dot" aria-hidden="true"></div>7 ימים אחרונים — יומי</div>
+        <div class="chart-wrap"><canvas id="chartInterceptions" aria-label="גרף 7 ימים"></canvas></div>
       </div>
     </div>
     <div class="chart-card">
@@ -442,19 +442,8 @@ Chart.defaults.plugins.legend.display = false;
 // ═══════════════════════════════════════════════
 // STATIC DATA (IDF / official sources)
 // ═══════════════════════════════════════════════
-const WEAPONS_DATA = {
-  labels:      ["טילים בליסטיים\n(איראן)", "כטב\"מים\n(איראן)", "טילים\n(לבנון)", "כטב\"מים\n(לבנון)"],
-  totals:      [300,  167,  1300, 74],
-  intercepted: [278,  160,  1170, 60],
-  hit:         [20,   6,    130,  14],
-  colors:      ["#ff4422","#ff8800","#ffcc00","#00ccff"],
-};
-
-const CASUALTIES_DATA = {
-  labels:  ["28.02","01.03","02.03","12.03","18.03"],
-  killed:  [2, 11, 12, 12, 14],
-  injured: [21, 72, 72, 285, 385],
-};
+// MOH casualties stored globally after async fetch so charts can use it
+let _mohCasualties = null;
 
 
 // ═══════════════════════════════════════════════
@@ -509,7 +498,9 @@ function buildStats(api) {
     total:       timelineTotal,
     today:       todayCount,
     last7d:      totals.last7d    || 0,
+    last30d:     totals.last30d   || 0,
     uniqueAreas: api.uniqueCities || 0,
+    uniqueZones: api.uniqueZones  || 0,
     realAlerts,
     opDays,
     peakDay:     peakEntry,
@@ -533,8 +524,10 @@ function updateKPIs(stats) {
   anim("kpiAreas",  stats.uniqueAreas);
   anim("kpiAvg",    stats.avgPerDay);
   anim("kpiReal",   stats.realAlerts);
-  anim("kpiMevazek",stats.last7d);
-  anim("kpiOpDays", stats.opDays);
+  anim("kpiMevazek", stats.last7d);
+  anim("kpiOpDays",  stats.opDays);
+  anim("kpiZones",   stats.uniqueZones);
+  anim("kpiLast30",  stats.last30d);
 
   // Dynamic sub-labels so units are always clear
   const isFiltered = currentStartDate !== OP_START || currentEndDate !== "";
@@ -761,89 +754,69 @@ function drawThreats(topOrigins) {
 }
 
 // ── Weapons (IDF data) ──
-function drawWeapons() {
+// ── Alarms by origin — real topOrigins data ──
+function drawWeapons(topOrigins) {
+  if (!topOrigins || topOrigins.length === 0) return;
+  const COLORS = { iran: "#cc44ff", lebanon: "#00ffaa", fa: "#ff8800", yemen: "#ffcc00", gaza: "#ff2255" };
+  const labels = topOrigins.map(o => originLabel(o.origin));
+  const values = topOrigins.map(o => o.count);
+  const colors = topOrigins.map(o => COLORS[o.origin] || "#888888");
+
   buildOrUpdate("chartWeapons", {
     type: "bar",
     data: {
-      labels: WEAPONS_DATA.labels,
-      datasets: [
-        {
-          label:           "סה\"כ שוגרו",
-          data:            WEAPONS_DATA.totals,
-          backgroundColor: WEAPONS_DATA.colors.map(c => c + "55"),
-          borderColor:     WEAPONS_DATA.colors,
-          borderWidth:     2,
-          borderRadius:    4,
-        },
-        {
-          label:           "יורטו ✓",
-          data:            WEAPONS_DATA.intercepted,
-          backgroundColor: "rgba(0,255,136,0.35)",
-          borderColor:     "#00ff88",
-          borderWidth:     2,
-          borderRadius:    4,
-        },
-        {
-          label:           "פגעו / לא יורטו",
-          data:            WEAPONS_DATA.hit,
-          backgroundColor: "rgba(255,255,255,0.2)",
-          borderColor:     "rgba(255,255,255,0.5)",
-          borderWidth:     1,
-          borderRadius:    4,
-        },
-      ],
+      labels,
+      datasets: [{
+        label:           "אירועי אזעקה",
+        data:            values,
+        backgroundColor: colors.map(c => c + "66"),
+        borderColor:     colors,
+        borderWidth:     2,
+        borderRadius:    6,
+      }],
     },
     options: {
+      indexAxis: "y",
       responsive: true, maintainAspectRatio: false,
       plugins: {
-        legend: { display: true, labels: { color: "rgba(255,255,255,0.5)", font: { size: 11 } } },
-        tooltip: { callbacks: { label: (i) => ` ${(i.raw ?? 0).toLocaleString("he-IL")}` } },
+        legend: { display: false },
+        tooltip: { callbacks: { label: (i) => ` ${i.raw.toLocaleString("he-IL")} אירועים` } },
       },
-      scales: { x: axisX(), y: axisY() },
+      scales: { x: axisY(), y: axisX() },
     },
   });
 }
 
-// ── Casualties over time ──
-function drawCasualtiesChart() {
+// ── Casualties by severity — real MOH data ──
+function drawCasualtiesChart(cas) {
+  cas = cas || _mohCasualties;
+  if (!cas) return;
+  const rows    = cas.rows.filter(r => r.count > 0);
+  const labels  = rows.map(r => r.label);
+  const values  = rows.map(r => r.count);
+  const colors  = rows.map(r => r.color);
+
   buildOrUpdate("chartCasualties", {
-    type: "line",
+    type: "bar",
     data: {
-      labels: CASUALTIES_DATA.labels,
-      datasets: [
-        {
-          label: "הרוגים",
-          data:  CASUALTIES_DATA.killed,
-          borderColor:     "#ff4422",
-          backgroundColor: "rgba(255,68,34,0.1)",
-          borderWidth: 2,
-          pointRadius: 5,
-          pointBackgroundColor: "#ff4422",
-          fill: true, tension: 0.3,
-        },
-        {
-          label: "פצועים (מצטבר)",
-          data:  CASUALTIES_DATA.injured,
-          borderColor:     "#ff8800",
-          backgroundColor: "rgba(255,136,0,0.08)",
-          borderWidth: 2,
-          pointRadius: 5,
-          pointBackgroundColor: "#ff8800",
-          fill: true, tension: 0.3,
-          yAxisID: "y2",
-        },
-      ],
+      labels,
+      datasets: [{
+        label:           "נפגעים",
+        data:            values,
+        backgroundColor: colors.map(c => c + "66"),
+        borderColor:     colors,
+        borderWidth:     2,
+        borderRadius:    6,
+      }],
     },
     options: {
+      indexAxis: "y",
       responsive: true, maintainAspectRatio: false,
       plugins: {
-        legend: { display: true, labels: { color: "rgba(255,255,255,0.5)", font: { size: 11 } } },
+        legend: { display: false },
+        tooltip: { callbacks: { label: (i) => ` ${i.raw.toLocaleString("he-IL")} נפגעים` } },
       },
-      scales: {
-        x:  axisX(),
-        y:  axisY({ position: "right" }),
-        y2: { ...axisY(), grid: { display: false }, position: "left" },
-      },
+      scales: { x: axisY(), y: axisX() },
     },
   });
 }
@@ -884,47 +857,32 @@ function drawAlertTypes(topOrigins) {
   });
 }
 
-// ── Interceptions stacked bar ──
-function drawInterceptions() {
-  const notIntercepted = WEAPONS_DATA.totals.map((t, i) => t - WEAPONS_DATA.intercepted[i]);
+// ── Last 7 days daily trend — real timeline data ──
+function drawInterceptions(byDay) {
+  if (!byDay || byDay.length === 0) return;
+  const last7 = byDay.slice(-7);
+  const labels = last7.map(e => formatDateShort(e[0]));
+  const values = last7.map(e => e[1]);
+  const max    = Math.max(...values);
 
   buildOrUpdate("chartInterceptions", {
     type: "bar",
     data: {
-      labels: WEAPONS_DATA.labels,
-      datasets: [
-        {
-          label:           "יורטו ✓",
-          data:            WEAPONS_DATA.intercepted,
-          backgroundColor: "rgba(0,255,136,0.45)",
-          borderColor:     "#00ff88",
-          borderWidth:     2,
-          borderRadius:    4,
-          stack:           "s",
-        },
-        {
-          label:           "לא יורטו / פגעו",
-          data:            notIntercepted,
-          backgroundColor: "rgba(255,68,34,0.45)",
-          borderColor:     "#ff4422",
-          borderWidth:     2,
-          borderRadius:    4,
-          stack:           "s",
-        },
-      ],
+      labels,
+      datasets: [{
+        label:           "אירועים",
+        data:            values,
+        backgroundColor: values.map(v => `hsla(${200 + (v / max) * 60}, 80%, 55%, 0.65)`),
+        borderColor:     values.map(v => `hsla(${200 + (v / max) * 60}, 80%, 65%, 1)`),
+        borderWidth:     2,
+        borderRadius:    4,
+      }],
     },
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: {
-        legend: { display: true, labels: { color: "rgba(255,255,255,0.5)", font: { size: 11 } } },
-        tooltip: { callbacks: {
-          label:  (i)     => ` ${(i.raw ?? 0).toLocaleString("he-IL")}`,
-          footer: (items) => {
-            const idx  = items[0].dataIndex;
-            const rate = Math.round((WEAPONS_DATA.intercepted[idx] / WEAPONS_DATA.totals[idx]) * 100);
-            return `אחוז יירוט: ${rate}%`;
-          },
-        }},
+        legend: { display: false },
+        tooltip: { callbacks: { label: (i) => ` ${i.raw.toLocaleString("he-IL")} אירועים` } },
       },
       scales: { x: axisX(), y: axisY() },
     },
@@ -942,10 +900,10 @@ function renderStats(stats) {
   drawAreas(stats.topCities);
   drawRegions(stats.topZones);
   drawThreats(stats.topOrigins);
-  drawWeapons();
-  drawCasualtiesChart();
+  drawWeapons(stats.topOrigins);
+  drawCasualtiesChart(_mohCasualties);
   drawAlertTypes(stats.topOrigins);
-  drawInterceptions();
+  drawInterceptions(stats.byDay);
 }
 
 function showConnectionError() {
@@ -953,7 +911,7 @@ function showConnectionError() {
   showBanner("bannerError");
   hideBanner("bannerProxy");
   ["kpiTotal","kpiToday","kpiPeak","kpiPeakDate","kpiAreas",
-   "kpiAvg","kpiReal","kpiMevazek","kpiOpDays","kpiIntercepted","kpiInterceptRate"].forEach(id => setText(id, "—"));
+   "kpiAvg","kpiReal","kpiMevazek","kpiOpDays","kpiZones","kpiLast30"].forEach(id => setText(id, "—"));
 }
 
 async function refresh() {
@@ -1084,10 +1042,14 @@ window.addEventListener("load", async () => {
   // Short pause to let the progress bar animation start
   await new Promise(resolve => setTimeout(resolve, 600));
 
-  // Fetch casualties from MOH in parallel with main stats
+  // Fetch MOH casualties in parallel — store globally so charts can use it
   fetchCasualties().then(raw => {
     const cas = buildCasualties(raw);
-    if (cas) drawCasualties(cas);
+    if (cas) {
+      _mohCasualties = cas;
+      drawCasualties(cas);
+      drawCasualtiesChart(cas);
+    }
   });
 
   try {
@@ -1096,9 +1058,8 @@ window.addEventListener("load", async () => {
     console.error("Boot error:", err);
     showConnectionError();
   } finally {
-    try { drawWeapons();          } catch (e) { console.warn("drawWeapons failed:",      e); }
-    try { drawCasualtiesChart();  } catch (e) { console.warn("drawCasualties failed:",   e); }
-    try { drawInterceptions();    } catch (e) { console.warn("drawInterceptions failed:",e); }
+    // drawWeapons / drawCasualtiesChart / drawInterceptions are now data-driven
+    // and called from renderStats / MOH fetch — no static fallback needed
     hideLoader();
   }
 });
