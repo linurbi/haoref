@@ -281,6 +281,20 @@ async function fetchCasualties() {
   }
 }
 
+// ── Fetch daily casualties time-series ───────────────────────────────────────
+async function fetchDailyCasualties() {
+  try {
+    const resp = await fetch(CF_WORKER_URL + "/daily-casualties", { cache: "no-store" });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+    return data;
+  } catch (e) {
+    console.warn("Daily casualties fetch failed:", e.message);
+    return null;
+  }
+}
+
 // ── Parse MOH response → display severity breakdown ──────────────────────────
 const CAS_SEVERITY = [
   { status: "נפטרים בבי\"ח",   label: "נפטרו",       color: "#ff1155" },
@@ -787,36 +801,65 @@ function drawWeapons(topOrigins) {
   });
 }
 
-// ── Casualties by severity — real MOH data ──
-function drawCasualtiesChart(cas) {
-  cas = cas || _mohCasualties;
-  if (!cas) return;
-  const rows    = cas.rows.filter(r => r.count > 0);
-  const labels  = rows.map(r => r.label);
-  const values  = rows.map(r => r.count);
-  const colors  = rows.map(r => r.color);
+// ── Casualties over time — daily MOH data ──
+function drawCasualtiesChart(dailyRaw) {
+  if (!dailyRaw || !Array.isArray(dailyRaw)) return;
+
+  // Filter for current operation, sort by date
+  const opRows = dailyRaw
+    .filter(r => r.eventType === "שאגת הארי" || r.eventType === "סך הכל")
+    .filter((r, _, arr) => {
+      // prefer שאגת הארי; fall back to סך הכל if no שאגת הארי data
+      const hasOp = arr.some(x => x.eventType === "שאגת הארי");
+      return hasOp ? r.eventType === "שאגת הארי" : r.eventType === "סך הכל";
+    })
+    .sort((a, b) => a.enterDate.localeCompare(b.enterDate));
+
+  if (opRows.length === 0) return;
+
+  const labels     = opRows.map(r => formatDateShort(r.enterDate.split("T")[0]));
+  const daily      = opRows.map(r => r.casualtiesPerDay);
+  let   cumulative = 0;
+  const cumul      = opRows.map(r => (cumulative += r.casualtiesPerDay));
 
   buildOrUpdate("chartCasualties", {
     type: "bar",
     data: {
       labels,
-      datasets: [{
-        label:           "נפגעים",
-        data:            values,
-        backgroundColor: colors.map(c => c + "66"),
-        borderColor:     colors,
-        borderWidth:     2,
-        borderRadius:    6,
-      }],
+      datasets: [
+        {
+          type:            "line",
+          label:           "מצטבר",
+          data:            cumul,
+          borderColor:     "#ff5500",
+          backgroundColor: "transparent",
+          borderWidth:     2,
+          pointRadius:     0,
+          tension:         0.3,
+          yAxisID:         "y2",
+        },
+        {
+          label:           "יומי",
+          data:            daily,
+          backgroundColor: "rgba(255,136,0,0.55)",
+          borderColor:     "#ff8800",
+          borderWidth:     1,
+          borderRadius:    2,
+          yAxisID:         "y",
+        },
+      ],
     },
     options: {
-      indexAxis: "y",
       responsive: true, maintainAspectRatio: false,
       plugins: {
-        legend: { display: false },
+        legend: { display: true, labels: { color: "rgba(255,255,255,0.5)", font: { size: 11 } } },
         tooltip: { callbacks: { label: (i) => ` ${i.raw.toLocaleString("he-IL")} נפגעים` } },
       },
-      scales: { x: axisY(), y: axisX() },
+      scales: {
+        x:  axisX({ ticks: { maxTicksLimit: 10 } }),
+        y:  axisY({ position: "left" }),
+        y2: { ...axisY(), position: "right", grid: { display: false } },
+      },
     },
   });
 }
@@ -901,7 +944,7 @@ function renderStats(stats) {
   drawRegions(stats.topZones);
   drawThreats(stats.topOrigins);
   drawWeapons(stats.topOrigins);
-  drawCasualtiesChart(_mohCasualties);
+  // drawCasualtiesChart is driven by MOH daily fetch, not by stats refresh
   drawAlertTypes(stats.topOrigins);
   drawInterceptions(stats.byDay);
 }
@@ -1042,14 +1085,16 @@ window.addEventListener("load", async () => {
   // Short pause to let the progress bar animation start
   await new Promise(resolve => setTimeout(resolve, 600));
 
-  // Fetch MOH casualties in parallel — store globally so charts can use it
+  // Fetch MOH data in parallel — severity totals + daily time-series
   fetchCasualties().then(raw => {
     const cas = buildCasualties(raw);
     if (cas) {
       _mohCasualties = cas;
       drawCasualties(cas);
-      drawCasualtiesChart(cas);
     }
+  });
+  fetchDailyCasualties().then(raw => {
+    if (raw) drawCasualtiesChart(raw);
   });
 
   try {

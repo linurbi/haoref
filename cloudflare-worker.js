@@ -4,7 +4,8 @@
  */
 
 const REDALERT_BASE  = "https://redalert.orielhaim.com";
-const MOH_CASUALTIES = "https://datadashboard.health.gov.il/api/war-casualties/totalCasualtiesByStatus";
+const MOH_CASUALTIES       = "https://datadashboard.health.gov.il/api/war-casualties/totalCasualtiesByStatus";
+const MOH_DAILY_CASUALTIES = "https://datadashboard.health.gov.il/api/war-casualties/dailyCasualties";
 const OP_START       = "2026-02-28T00:00:00Z";
 
 const CORS = {
@@ -25,9 +26,14 @@ async function handleRequest(request) {
   var url      = new URL(request.url);
   var pathname = url.pathname;
 
-  // ── Route: /casualties — proxy MOH Health Ministry data ──
+  // ── Route: /casualties — MOH aggregate totals ──
   if (pathname.endsWith("/casualties")) {
     return handleCasualties();
+  }
+
+  // ── Route: /daily-casualties — MOH daily time-series ──
+  if (pathname.endsWith("/daily-casualties")) {
+    return handleMohEndpoint(MOH_DAILY_CASUALTIES, 1800);
   }
 
   // ── Route: default — proxy RedAlert stats ──
@@ -64,15 +70,20 @@ async function handleRequest(request) {
 }
 
 async function handleCasualties() {
+  return handleMohEndpoint(MOH_CASUALTIES, 1800);
+}
+
+async function handleMohEndpoint(url, cacheSec) {
   try {
-    var resp = await fetch(MOH_CASUALTIES, {
+    var resp = await fetch(url, {
       headers: { "Accept": "application/json", "Referer": "https://datadashboard.health.gov.il/" },
     });
     if (!resp.ok) throw new Error("MOH API " + resp.status);
     var body = await resp.text();
     return new Response(body, {
       status: 200,
-      headers: { ...CORS, "Content-Type": "application/json; charset=utf-8", "Cache-Control": "max-age=1800, s-maxage=1800" },
+      headers: { ...CORS, "Content-Type": "application/json; charset=utf-8",
+                 "Cache-Control": "max-age=" + cacheSec + ", s-maxage=" + cacheSec },
     });
   } catch (e) {
     return new Response(JSON.stringify({ error: e.message }), {
