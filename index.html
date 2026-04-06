@@ -44,7 +44,7 @@
         crossorigin="anonymous"
         referrerpolicy="no-referrer"></script>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Heebo:wght@300;400;600;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=4">
+<link rel="stylesheet" href="styles.css?v=5">
 
 </head>
 <body>
@@ -111,7 +111,8 @@
   <div class="filter-bar" role="toolbar" aria-label="סינון לפי תאריך">
     <label>סינון:</label>
     <button class="filter-btn active" data-range="all">הכל</button>
-    <button class="filter-btn" data-range="7">7 ימים אחרונים</button>
+    <button class="filter-btn" data-range="today">היום</button>
+    <button class="filter-btn" data-range="7">7 ימים</button>
     <button class="filter-btn" data-range="14">14 ימים</button>
     <button class="filter-btn" data-range="30">30 ימים</button>
     <button class="filter-btn" data-range="custom">טווח מותאם ▾</button>
@@ -168,9 +169,9 @@
         <div class="kpi-sub">אזעקות בשבוע</div>
       </div>
       <div class="kpi-cell c8">
-        <div class="kpi-lbl">התרעות מוקדמות</div>
-        <div class="kpi-num" id="kpiPreAlert">—</div>
-        <div class="kpi-sub">מבזק — לפני אזעקה</div>
+        <div class="kpi-lbl">ימי מבצע</div>
+        <div class="kpi-num" id="kpiOpDays">—</div>
+        <div class="kpi-sub">מאז 28.02.2026</div>
       </div>
       <div class="kpi-cell c9">
         <div class="kpi-lbl">יירוטים (צה"ל)</div>
@@ -408,7 +409,9 @@ function buildStats(api) {
     ? [peak.period, peak.count]
     : byDay.reduce((m, e) => (e[1] > m[1] ? e : m), ["", 0]);
 
-  const avgPerDay = byDay.length ? Math.round(totals.range / byDay.length) : 0;
+  // avgPerDay uses timeline counts (same unit as peak — events per day, not city-hits)
+  const timelineTotal = byDay.reduce((s, e) => s + e[1], 0);
+  const avgPerDay = byDay.length ? Math.round(timelineTotal / byDay.length) : 0;
 
   // Origins: Iran + Yemen = ballistic proxy
   const ballisticOrigins = ["iran", "yemen", "fa"];
@@ -416,13 +419,16 @@ function buildStats(api) {
     .filter(o => ballisticOrigins.includes(o.origin))
     .reduce((s, o) => s + o.count, 0);
 
+  const OP_START_DATE = new Date("2026-02-28T00:00:00Z");
+  const opDays = Math.floor((Date.now() - OP_START_DATE.getTime()) / 86400000);
+
   return {
     total:       totals.range     || 0,
     today:       totals.last24h   || 0,
     last7d:      totals.last7d    || 0,
     uniqueAreas: api.uniqueCities || 0,
-    preAlerts,
     realAlerts,
+    opDays,
     peakDay:     peakEntry,
     avgPerDay,
     byDay,
@@ -445,16 +451,7 @@ function updateKPIs(stats) {
   anim("kpiAvg",    stats.avgPerDay);
   anim("kpiReal",   stats.realAlerts);
   anim("kpiMevazek",stats.last7d);
-
-  // Pre-alerts: animate if the API provides the number, otherwise show N/A
-  const preEl = document.getElementById("kpiPreAlert");
-  if (preEl) {
-    if (stats.preAlerts !== null) {
-      countUp(preEl, stats.preAlerts);
-    } else {
-      preEl.textContent = "N/A";
-    }
-  }
+  anim("kpiOpDays", stats.opDays);
 
   setText("kpiCityHits", stats.uniqueAreas.toLocaleString("he-IL") + " יישובים ייחודיים");
   setText("kpiPeakDate", formatDate(stats.peakDay[0]));
@@ -850,7 +847,7 @@ function showConnectionError() {
   showBanner("bannerError");
   hideBanner("bannerProxy");
   ["kpiTotal","kpiToday","kpiPeak","kpiPeakDate","kpiAreas",
-   "kpiAvg","kpiReal","kpiMevazek","kpiPreAlert","kpiIntercepted","kpiInterceptRate"].forEach(id => setText(id, "—"));
+   "kpiAvg","kpiReal","kpiMevazek","kpiOpDays","kpiIntercepted","kpiInterceptRate"].forEach(id => setText(id, "—"));
 }
 
 async function refresh() {
@@ -952,6 +949,11 @@ window.addEventListener("load", async () => {
       customDiv.style.display = "none";
       if (range === "all") {
         currentStartDate = OP_START;
+        currentEndDate   = "";
+      } else if (range === "today") {
+        const today = new Date();
+        today.setUTCHours(0, 0, 0, 0);
+        currentStartDate = today.toISOString().replace(".000","");
         currentEndDate   = "";
       } else {
         const d = new Date(Date.now() - parseInt(range, 10) * 86_400_000);
