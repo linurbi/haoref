@@ -44,7 +44,7 @@
         crossorigin="anonymous"
         referrerpolicy="no-referrer"></script>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Heebo:wght@300;400;600;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=5">
+<link rel="stylesheet" href="styles.css?v=6">
 
 </head>
 <body>
@@ -130,14 +130,14 @@
     <!-- Row A: main operational stats -->
     <div class="kpi-bar kpi-bar-top">
       <div class="kpi-cell c1">
-        <div class="kpi-lbl">סה"כ אזעקות</div>
+        <div class="kpi-lbl">סה"כ אירועי אזעקה</div>
         <div class="kpi-num" id="kpiTotal">—</div>
-        <div class="kpi-sub">מתחילת המבצע</div>
+        <div class="kpi-sub" id="kpiTotalSub">בטווח הנבחר</div>
       </div>
       <div class="kpi-cell c2">
         <div class="kpi-lbl">אזעקות היום</div>
         <div class="kpi-num" id="kpiToday">—</div>
-        <div class="kpi-sub">24 שעות אחרונות</div>
+        <div class="kpi-sub" id="kpiTodaySub">אירועים היום</div>
       </div>
       <div class="kpi-cell c3">
         <div class="kpi-lbl">שיא יומי</div>
@@ -405,13 +405,18 @@ function buildStats(api) {
     .sort((a, b) => a.period.localeCompare(b.period))
     .map(t => [t.period, t.count]);
 
-  const peakEntry = peak.period
-    ? [peak.period, peak.count]
-    : byDay.reduce((m, e) => (e[1] > m[1] ? e : m), ["", 0]);
-
-  // avgPerDay uses timeline counts (same unit as peak — events per day, not city-hits)
+  // All daily metrics use timeline counts (unique alarm events, not city-activations)
+  // so total, today, peak, and avg are always the same unit.
   const timelineTotal = byDay.reduce((s, e) => s + e[1], 0);
-  const avgPerDay = byDay.length ? Math.round(timelineTotal / byDay.length) : 0;
+  const avgPerDay     = byDay.length ? Math.round(timelineTotal / byDay.length) : 0;
+
+  const peakEntry = byDay.reduce((m, e) => (e[1] > m[1] ? e : m), ["", 0]);
+
+  // "Today" = the timeline entry whose period matches today's date (Israel = UTC+3)
+  const nowIL    = new Date(Date.now() + 3 * 3_600_000);
+  const todayStr = nowIL.toISOString().split("T")[0];
+  const todayEntry  = byDay.find(e => e[0].startsWith(todayStr));
+  const todayCount  = todayEntry ? todayEntry[1] : 0;
 
   // Origins: Iran + Yemen = ballistic proxy
   const ballisticOrigins = ["iran", "yemen", "fa"];
@@ -423,8 +428,8 @@ function buildStats(api) {
   const opDays = Math.floor((Date.now() - OP_START_DATE.getTime()) / 86400000);
 
   return {
-    total:       totals.range     || 0,
-    today:       totals.last24h   || 0,
+    total:       timelineTotal,
+    today:       todayCount,
     last7d:      totals.last7d    || 0,
     uniqueAreas: api.uniqueCities || 0,
     realAlerts,
@@ -452,6 +457,11 @@ function updateKPIs(stats) {
   anim("kpiReal",   stats.realAlerts);
   anim("kpiMevazek",stats.last7d);
   anim("kpiOpDays", stats.opDays);
+
+  // Dynamic sub-labels so units are always clear
+  const isFiltered = currentStartDate !== OP_START || currentEndDate !== "";
+  setText("kpiTotalSub", isFiltered ? "אירועים בטווח הנבחר" : "מתחילת המבצע");
+  setText("kpiTodaySub",  stats.today > 0 ? "אירועים היום" : "אין נתוני היום בטווח");
 
   setText("kpiCityHits", stats.uniqueAreas.toLocaleString("he-IL") + " יישובים ייחודיים");
   setText("kpiPeakDate", formatDate(stats.peakDay[0]));
