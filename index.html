@@ -44,7 +44,7 @@
         crossorigin="anonymous"
         referrerpolicy="no-referrer"></script>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Heebo:wght@300;400;600;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="styles.css?v=4">
 
 </head>
 <body>
@@ -354,9 +354,9 @@ let currentStartDate = OP_START;
 let currentEndDate   = "";
 
 
-// ── Chart.js navy-theme defaults ──
-Chart.defaults.color          = "rgba(170,185,255,0.55)";
-Chart.defaults.borderColor    = "rgba(70,110,255,0.1)";
+// ── Chart.js amber-theme defaults ──
+Chart.defaults.color          = "rgba(200,205,230,0.48)";
+Chart.defaults.borderColor    = "rgba(255,136,0,0.1)";
 Chart.defaults.font.family    = "'Heebo', sans-serif";
 Chart.defaults.plugins.legend.display = false;
 
@@ -507,8 +507,8 @@ function drawDaily(byDay) {
       labels: byDay.map(e => formatDateShort(Array.isArray(e) ? e[0] : e.period)),
       datasets: [{
         data: values,
-        backgroundColor: values.map(v => `rgba(68,119,255,${0.25 + (v / maxVal) * 0.65})`),
-        borderColor:    "rgba(100,150,255,0.7)",
+        backgroundColor: values.map(v => `rgba(255,136,0,${0.2 + (v / maxVal) * 0.65})`),
+        borderColor:    "rgba(255,170,50,0.7)",
         borderWidth: 1,
         borderRadius: 3,
       }],
@@ -912,13 +912,17 @@ function setSourceBadge(type, text) {
 
 function formatDate(iso) {
   if (!iso) return "—";
-  const [y, m, d] = iso.split("-");
-  return `${d}.${m}.${y}`;
+  const datePart = String(iso).split("T")[0];  // strip time if ISO datetime
+  const [y, m, d] = datePart.split("-");
+  if (!y || !m || !d) return "—";
+  return `${d}.${m}.${String(y).slice(-4)}`;
 }
 
 function formatDateShort(iso) {
   if (!iso) return "";
-  const [, m, d] = iso.split("-");
+  const datePart = String(iso).split("T")[0];
+  const [, m, d] = datePart.split("-");
+  if (!m || !d) return "";
   return `${d}/${m}`;
 }
 
