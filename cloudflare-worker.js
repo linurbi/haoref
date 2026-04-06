@@ -30,6 +30,11 @@ async function handleRequest(request) {
     return handleCasualties();
   }
 
+  // ── Route: /history — proxy RedAlert raw history ──
+  if (pathname.endsWith("/history")) {
+    return handleHistory(url);
+  }
+
   // ── Route: default — proxy RedAlert stats ──
   var startDate = url.searchParams.get("startDate") || OP_START;
   var endDate   = url.searchParams.get("endDate")   || "";
@@ -54,6 +59,33 @@ async function handleRequest(request) {
     return new Response(body, {
       status: 200,
       headers: { ...CORS, "Content-Type": "application/json; charset=utf-8", "Cache-Control": "max-age=60, s-maxage=60" },
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: e.message }), {
+      status: 503,
+      headers: { ...CORS, "Content-Type": "application/json" },
+    });
+  }
+}
+
+async function handleHistory(url) {
+  var startDate = url.searchParams.get("startDate") || OP_START;
+  var endDate   = url.searchParams.get("endDate")   || "";
+  var apiUrl = REDALERT_BASE + "/api/stats/history"
+    + "?startDate=" + encodeURIComponent(startDate)
+    + (endDate ? "&endDate=" + encodeURIComponent(endDate) : "");
+  try {
+    var resp = await fetch(apiUrl, {
+      headers: { "Authorization": "Bearer " + REDALERT_KEY, "Accept": "application/json" },
+    });
+    if (!resp.ok) {
+      var errBody = await resp.text().catch(() => "");
+      throw new Error("RedAlert history " + resp.status + ": " + errBody.slice(0, 500));
+    }
+    var body = await resp.text();
+    return new Response(body, {
+      status: 200,
+      headers: { ...CORS, "Content-Type": "application/json; charset=utf-8", "Cache-Control": "max-age=300" },
     });
   } catch (e) {
     return new Response(JSON.stringify({ error: e.message }), {
