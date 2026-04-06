@@ -1,11 +1,11 @@
-# Fetch Telegram channel via t.me/s/ public web view -> parse alerts -> upload to GitHub Gist
+# Fetch Telegram channel via t.me/s/ public web view -> parse alerts -> save to GitHub repo data branch
 # No HTML export files, no bot admin rights needed.
 
-$CHANNEL      = "PikudHaOref_all"
-$outputFile   = if ($env:GITHUB_ACTIONS) { "./oref_history.json" } else { "c:\Linur\Projects\customers\Haoref\oref_history.json" }
-$GIST_ID      = if ($env:GIST_ID)    { $env:GIST_ID }    else { "972798220ff080e050a3a4a0d386b3e0" }
-$GITHUB_TOKEN = if ($env:GIST_TOKEN) { $env:GIST_TOKEN } else { throw "Set GIST_TOKEN env var or env:GIST_TOKEN" }
-$START_DATE   = [datetime]"2026-03-31"   # TEST: change to 2026-02-28 for full backfill
+$CHANNEL    = "PikudHaOref_all"
+$outputFile = if ($env:GITHUB_ACTIONS) { "./oref_history.json" } else { "c:\Linur\Projects\customers\Haoref\oref_history.json" }
+$START_DATE = [datetime]"2026-03-31"   # TEST: change to 2026-02-28 for full backfill
+# Data is read from / written to the repo's 'data' branch via raw.githubusercontent.com
+$DATA_BASE  = "https://raw.githubusercontent.com/linurbi/haoref/data"
 
 # ── JSON helpers ──────────────────────────────────────────────────────────────
 function Escape-Str([string]$s) {
@@ -16,44 +16,38 @@ function Rec([PSCustomObject]$r) {
 }
 function Strip-Html($s) { [regex]::Replace($s,'<[^>]+>',' ').Trim() -replace '\s+',' ' }
 
-# ── Load existing Gist data so we only fetch what's new ──────────────────────
+# ── Load existing data from repo data branch so we only fetch what's new ──────
 $results  = [System.Collections.ArrayList]::new()
 $seen     = [System.Collections.Generic.HashSet[string]]::new()
 
-$headers = @{ Authorization = "token $GITHUB_TOKEN"; Accept = "application/vnd.github+json" }
-function Load-GistFile([object]$fileInfo) {
-    if (-not $fileInfo) { return @() }
-    if ($fileInfo.truncated) {
-        # File > ~1 MB — content is truncated in the API response, must download via raw_url
-        Write-Host "    (large file — downloading via raw_url)"
-        $r = Invoke-WebRequest $fileInfo.raw_url -UseBasicParsing -Headers $headers -TimeoutSec 60
+function Load-DataFile([string]$url) {
+    try {
+        $r = Invoke-WebRequest "$url`?t=$(Get-Date -UFormat %s)" -UseBasicParsing -TimeoutSec 60 -ErrorAction Stop
         $parsed = $r.Content | ConvertFrom-Json
         return if ($parsed) { @($parsed) } else { @() }
+    } catch {
+        return @()
     }
-    $parsed = $fileInfo.content | ConvertFrom-Json
-    return if ($parsed) { @($parsed) } else { @() }
 }
 
 try {
-    $gistResp = Invoke-RestMethod "https://api.github.com/gists/$GIST_ID" -Headers $headers -UseBasicParsing
-    $existing1 = Load-GistFile $gistResp.files."oref_history_1.json"
-    $existing2 = Load-GistFile $gistResp.files."oref_history_2.json"
+    $existing1 = Load-DataFile "$DATA_BASE/oref_history_1.json"
+    $existing2 = Load-DataFile "$DATA_BASE/oref_history_2.json"
     $existing  = @($existing1) + @($existing2) | Where-Object { $_ -ne $null }
     foreach ($a in $existing) {
         [void]$results.Add($a)
         [void]$seen.Add("$($a.alertDate)||$($a.data)")
     }
     $latestDate = ($existing | Sort-Object alertDate -Descending | Select-Object -First 1).alertDate
-    # If Gist has fewer than 500 records it's missing historical data — go back to START_DATE
     if ($existing.Count -lt 500 -or -not $latestDate) {
         $SINCE = $START_DATE
-        Write-Host "Loaded $($existing.Count) existing records from Gist — too few, backfilling from $START_DATE"
+        Write-Host "Loaded $($existing.Count) existing records — too few, backfilling from $START_DATE"
     } else {
         $SINCE = [datetime]$latestDate
-        Write-Host "Loaded $($existing.Count) existing records from Gist. Latest: $latestDate"
+        Write-Host "Loaded $($existing.Count) existing records. Latest: $latestDate"
     }
 } catch {
-    Write-Host "Could not load Gist (starting fresh): $_"
+    Write-Host "Could not load existing data (starting fresh): $_"
     $SINCE = $START_DATE
 }
 
@@ -210,7 +204,7 @@ if ($sorted.Count -gt 0) {
 }
 
 if ($sorted.Count -eq 0) {
-    Write-Host "No records to upload — aborting to avoid overwriting Gist with empty data."
+    Write-Host "No records — aborting to avoid overwriting data with empty file."
     exit 0
 }
 
@@ -225,8 +219,8 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 [System.IO.File]::WriteAllText($outputFile, $json, $utf8NoBom)
 Write-Host "Saved: $outputFile"
 
-# ── Split at ~22 MB ───────────────────────────────────────────────────────────
-$LIMIT = 22 * 1024 * 1024
+# ── Split at ~45 MB (GitHub file limit is 100 MB, well within limits) ────────
+$LIMIT = 45 * 1024 * 1024
 
 if ($jsonBytes -le $LIMIT) {
     $part1 = $json; $part2 = "[]"
@@ -248,46 +242,9 @@ $s1 = [Math]::Round([System.Text.Encoding]::UTF8.GetByteCount($part1)/1MB,1)
 $s2 = [Math]::Round([System.Text.Encoding]::UTF8.GetByteCount($part2)/1MB,1)
 Write-Host "part1=$s1 MB  part2=$s2 MB"
 
-# ── Upload each file to Gist ──────────────────────────────────────────────────
-function Upload-GistFile([string]$filename, [string]$content) {
-    $escaped = $content.Replace('\','\\').Replace('"','\"').Replace("`r`n",'\n').Replace("`n",'\n').Replace("`r",'\r')
-    $bodyStr = '{"files":{"' + $filename + '":{"content":"' + $escaped + '"}}}'
-    $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($bodyStr)
-
-    $req = [System.Net.HttpWebRequest]::Create("https://api.github.com/gists/$GIST_ID")
-    $req.Method = "PATCH"
-    $req.ContentType = "application/json; charset=utf-8"
-    $req.Headers["Authorization"] = "token $GITHUB_TOKEN"
-    $req.Headers["Accept"] = "application/vnd.github+json"
-    $req.UserAgent = "PowerShell"
-    $req.ContentLength = $bodyBytes.Length
-
-    $stream = $req.GetRequestStream()
-    $stream.Write($bodyBytes, 0, $bodyBytes.Length)
-    $stream.Close()
-
-    try {
-        $resp = $req.GetResponse()
-        $reader = New-Object System.IO.StreamReader($resp.GetResponseStream())
-        $respText = $reader.ReadToEnd()
-        $reader.Close(); $resp.Close()
-        if ($respText -match '"updated_at":"([^"]+)"') { return $Matches[1] }
-        return "ok"
-    } catch [System.Net.WebException] {
-        $errStream = $_.Exception.Response.GetResponseStream()
-        $errReader = New-Object System.IO.StreamReader($errStream)
-        $errText = $errReader.ReadToEnd()
-        $errReader.Close()
-        return "ERROR: $errText"
-    }
-}
-
-Write-Host "Uploading oref_history_1.json ($s1 MB)..."
-$r1 = Upload-GistFile "oref_history_1.json" $part1
-Write-Host "  -> $r1"
-
-Write-Host "Uploading oref_history_2.json ($s2 MB)..."
-$r2 = Upload-GistFile "oref_history_2.json" $part2
-Write-Host "  -> $r2"
-
-Write-Host "Done!"
+# ── Save files locally — the workflow's git step will push them to the data branch ──
+$utf8NoBom2 = New-Object System.Text.UTF8Encoding $false
+[System.IO.File]::WriteAllText("./oref_history_1.json", $part1, $utf8NoBom2)
+[System.IO.File]::WriteAllText("./oref_history_2.json", $part2, $utf8NoBom2)
+Write-Host "Saved oref_history_1.json ($s1 MB) and oref_history_2.json ($s2 MB)"
+Write-Host "Done! Workflow git step will push these to the data branch."

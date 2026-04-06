@@ -5,10 +5,8 @@
  * Tries multiple URL strategies to get the most complete history possible.
  */
 
-// ── Set this to your Gist ID once accumulate.py has uploaded data ──
-// Example: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"
-var GIST_ID      = "972798220ff080e050a3a4a0d386b3e0";
-var GIST_OWNER   = "linurbi";
+// ── GitHub repo data branch — source of historical alert data ──
+var DATA_BASE = "https://raw.githubusercontent.com/linurbi/haoref/data";
 
 addEventListener("fetch", function (event) {
   event.respondWith(handleRequest(event.request));
@@ -50,35 +48,22 @@ async function handleRequest(request) {
 
   var errors = [];
 
-  // ── Strategy 0: GitHub Gist — only used when no fromDate filter is requested ─
-  if (GIST_ID && GIST_OWNER && !fromDateParam) {
+  // ── Strategy 0: GitHub repo data branch (no size limits) ────────────────────
+  if (!fromDateParam) {
     try {
-      // Use the Gist API to get the current raw_url (includes revision hash → no CDN staleness)
-      var metaResp = await fetch("https://api.github.com/gists/" + GIST_ID, {
-        headers: { Accept: "application/vnd.github+json" },
-        cf: { cacheEverything: false },
-      });
-      var meta = await metaResp.json();
-      var files = meta.files || {};
-      async function fetchGistFile(name) {
-        var f = files[name];
-        if (!f || !f.raw_url) return [];
-        var r = await fetch(f.raw_url, { cf: { cacheEverything: false } });
-        var j = JSON.parse(await r.text());
-        return Array.isArray(j) ? j : [];
-      }
-      var parts = await Promise.all([
-        fetchGistFile("oref_history_1.json"),
-        fetchGistFile("oref_history_2.json"),
-      ]);
-      var combined = parts[0].concat(parts[1]);
+      var t = Date.now();
+      var r1 = await fetch(DATA_BASE + "/oref_history_1.json?t=" + t, { cf: { cacheEverything: false } });
+      var r2 = await fetch(DATA_BASE + "/oref_history_2.json?t=" + t, { cf: { cacheEverything: false } });
+      var d1 = r1.ok ? JSON.parse(await r1.text()) : [];
+      var d2 = r2.ok ? JSON.parse(await r2.text()) : [];
+      var combined = (Array.isArray(d1) ? d1 : []).concat(Array.isArray(d2) ? d2 : []);
       if (combined.length > 0) {
         return new Response(JSON.stringify(combined), {
           status: 200,
-          headers: corsHeaders("gist:" + combined.length),
+          headers: corsHeaders("repo:" + combined.length),
         });
       }
-    } catch (e) { errors.push("gist: " + e.message); }
+    } catch (e) { errors.push("repo: " + e.message); }
   }
 
   // ── Strategy 1: AlertsHistory with date range ─────────────────────────────

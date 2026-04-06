@@ -8,14 +8,14 @@ on:
 jobs:
   fetch:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write        # needed to push to the data branch
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Fetch new alerts from Telegram
         shell: pwsh
-        env:
-          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
         run: ./parse_telegram.ps1
 
       - name: Accumulate fresh alerts from OREF API
@@ -24,3 +24,23 @@ jobs:
         env:
           GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
         run: ./accumulate.ps1
+
+      - name: Push data files to data branch
+        run: |
+          # stash the generated JSON before switching branches
+          cp oref_history_1.json /tmp/oref1.json
+          cp oref_history_2.json /tmp/oref2.json
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # create an orphan commit on the data branch (single commit, no history bloat)
+          git checkout --orphan data-tmp
+          git rm -rf --cached . --quiet 2>/dev/null || true
+
+          cp /tmp/oref1.json oref_history_1.json
+          cp /tmp/oref2.json oref_history_2.json
+          git add oref_history_1.json oref_history_2.json
+          git commit -m "data: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push -f origin HEAD:data
+          echo "Data files pushed to data branch."

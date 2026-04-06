@@ -240,31 +240,20 @@ const OREF_URL     = "https://www.oref.org.il/warningMessages/alert/History/Aler
 
 const CF_WORKER_URL = "https://misty-pond-cb9d.linurbi.workers.dev";
 
-// ── GitHub Gist — primary historical data source ──────────────────────────
-const GIST_ID    = "972798220ff080e050a3a4a0d386b3e0";
-// Fetch via the Gist API so we always get the current revision's raw_url
-// (the /raw/{filename} CDN shortcut is aggressively cached and goes stale)
-async function fetchGistFiles() {
-  const meta = await fetchWithTimeout(
-    `https://api.github.com/gists/${GIST_ID}`,
-    { cache: "no-store", headers: { Accept: "application/vnd.github+json" } }
-  );
-  if (!meta.ok) throw new Error(`Gist API HTTP ${meta.status}`);
-  const info = await meta.json();
-  const files = info.files || {};
-  async function getFile(name) {
-    const f = files[name];
-    if (!f) return [];
-    const r = await fetchWithTimeout(f.raw_url, { cache: "no-store" });
-    if (!r.ok) return [];
-    const j = await r.json();
-    return Array.isArray(j) ? j : [];
-  }
-  const [d1, d2] = await Promise.all([
-    getFile("oref_history_1.json"),
-    getFile("oref_history_2.json"),
+// ── GitHub repo data branch — primary historical data source ─────────────────
+// Data files are pushed here by the GitHub Actions workflow (no API size limits)
+const DATA_BRANCH_BASE = "https://raw.githubusercontent.com/linurbi/haoref/data";
+async function fetchDataFiles() {
+  const t = Date.now();
+  const [r1, r2] = await Promise.all([
+    fetchWithTimeout(`${DATA_BRANCH_BASE}/oref_history_1.json?t=${t}`, { cache: "no-store" }),
+    fetchWithTimeout(`${DATA_BRANCH_BASE}/oref_history_2.json?t=${t}`, { cache: "no-store" }),
   ]);
-  return [...d1, ...d2];
+  const [d1, d2] = await Promise.all([
+    r1.ok ? r1.json() : Promise.resolve([]),
+    r2.ok ? r2.json() : Promise.resolve([]),
+  ]);
+  return [...(Array.isArray(d1) ? d1 : []), ...(Array.isArray(d2) ? d2 : [])];
 }
 
 // ── localStorage accumulation ─────────────────────────────────────────────
@@ -398,17 +387,17 @@ async function parseProxyResponse(resp, proxyHost) {
 }
 
 async function fetchAlerts() {
-  // -1a – Gist via API (always gets latest revision, no CDN staleness)
+  // -1a – GitHub repo data branch (no size limits, no API truncation)
   try {
-    const combined = await fetchGistFiles();
+    const combined = await fetchDataFiles();
     if (combined.length > 0) {
-      console.log(`[OREF] Gist OK — ${combined.length} records`);
+      console.log(`[OREF] Repo data OK — ${combined.length} records`);
       setSourceBadge("live", "● LIVE · Telegram history");
       hideBanner("bannerError");
       hideBanner("bannerProxy");
       return filterFromStart(combined);
     }
-  } catch (e) { console.warn("[OREF] Gist failed:", e.message); }
+  } catch (e) { console.warn("[OREF] Repo data failed:", e.message); }
 
   // -1b – Cloudflare Worker (fallback, also tries OREF API)
   if (CF_WORKER_URL) {
