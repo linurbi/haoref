@@ -28,7 +28,7 @@ async function handleRequest(request) {
   var apiUrl = REDALERT_BASE + "/api/stats/summary"
     + "?startDate=" + encodeURIComponent(startDate)
     + (endDate ? "&endDate=" + encodeURIComponent(endDate) : "")
-    + "&include=topCities,topZones,topOrigins,timeline,peak,earlyWarnings"
+    + "&include=topCities,topZones,topOrigins,timeline,peak"
     + "&timelineGroup=day"
     + "&topLimit=15";
 
@@ -41,7 +41,10 @@ async function handleRequest(request) {
       cf: { cacheEverything: false },
     });
 
-    if (!resp.ok) throw new Error("RedAlert API returned " + resp.status);
+    if (!resp.ok) {
+      var errBody = await resp.text().catch(() => "");
+      throw new Error("RedAlert API " + resp.status + ": " + errBody.slice(0, 300));
+    }
     var body = await resp.text();
 
     return new Response(body, {
