@@ -1,5 +1,6 @@
 # Scripts containing real credentials — never commit these
 load_history.ps1
+parse_telegram_d1.ps1
 load_history.py
 
 # HAR files may contain session tokens
