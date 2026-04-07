@@ -185,7 +185,7 @@
   <!-- Row 2: Top cities (rockets + UAV combined) + Region distribution -->
   <div class="charts-grid">
     <div class="chart-card" style="grid-column: span 2">
-      <div class="card-title"><div class="dot" aria-hidden="true"></div>יישובים מותקפים ביותר — רקטות + כלי טיס <span class="card-unit">Top 20 · לפי אזור</span></div>
+      <div class="card-title"><div class="dot" aria-hidden="true"></div>יישובים מותקפים ביותר — לפי ימי תקיפה <span class="card-unit">Top 20 · מיון לפי ימים ייחודיים</span></div>
       <div class="chart-wrap tall wide"><canvas id="chartAreas" aria-label="גרף יישובים מותקפים ביותר"></canvas></div>
     </div>
     <canvas id="chartRegions" style="display:none"></canvas>
@@ -705,13 +705,16 @@ function drawRegions() {}
 // ── Top cities stacked bar: rockets (orange) + UAV (cyan) per (city, zone) ──
 function drawAreas(topAreas) {
   if (!topAreas || topAreas.length === 0) return;
-  const items = topAreas.map(a => Array.isArray(a) ? { city: a[0], count: a[1], rockets: a[1], uav: 0 } : a);
+  const items = topAreas.map(a => Array.isArray(a) ? { city: a[0], count: a[1], incidents: a[1], rockets: a[1], uav: 0 } : a);
 
-  // Label: city name, tooltip shows zone
-  const labels   = items.map(a => {
+  // Label: "city (Xד)" — show days-under-attack inline so sorting is self-explanatory
+  const labels     = items.map(a => {
     const name = a.city || "";
-    return name.length > 20 ? name.slice(0, 20) + "…" : name;
+    const days = a.count || 0;
+    const short = name.length > 18 ? name.slice(0, 18) + "…" : name;
+    return `${short} (${days}ד)`;
   });
+  // Bars show incident volume (rockets + uav), sorted by sustained days (from server)
   const rocketVals = items.map(a => a.rockets || 0);
   const uavVals    = items.map(a => a.uav     || 0);
   const hasTypes   = items.some(a => (a.rockets || 0) + (a.uav || 0) > 0);
@@ -741,7 +744,7 @@ function drawAreas(topAreas) {
         },
       ] : [{
         label:           "אירועים",
-        data:            items.map(a => a.count),
+        data:            items.map(a => a.incidents || a.count),
         backgroundColor: items.map((_, i) => `hsla(${15 + (i/items.length)*30},90%,55%,0.7)`),
         borderRadius: 4,
         stack: "city",
@@ -764,10 +767,11 @@ function drawAreas(topAreas) {
             const item = items[items_[0].dataIndex];
             if (!item) return [];
             const lines = [];
+            lines.push(`📅 ימים מותקף: ${(item.count || 0).toLocaleString("he-IL")}`);
+            lines.push(`⚡ אירועים סה"כ: ${(item.incidents || 0).toLocaleString("he-IL")}`);
             if (item.rockets)     lines.push(`🚀 רקטות: ${item.rockets.toLocaleString("he-IL")}`);
             if (item.uav)         lines.push(`✈️  כלי טיס: ${item.uav.toLocaleString("he-IL")}`);
             if (item.ballistic)   lines.push(`💥 בליסטי: ${item.ballistic.toLocaleString("he-IL")}`);
-            lines.push(`סה"כ: ${(item.count || 0).toLocaleString("he-IL")}`);
             return lines;
           },
         }},

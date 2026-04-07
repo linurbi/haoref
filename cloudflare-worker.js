@@ -85,15 +85,19 @@ async function handleTgStats(url, env) {
         FROM tg_alerts ${where}${af}
         GROUP BY SUBSTR(alert_ts,1,13) ORDER BY count DESC LIMIT 1`).first(),
 
-      // Per (city, zone): count rockets + UAV combined, with per-type breakdown
+      // Per (city, zone): rank by UNIQUE DAYS under attack (sustained threat).
+      // Raw incident count is skewed by opening-day barrages (e.g. 21 waves on Dan area day-1).
+      // "Unique days attacked" correctly elevates northern border cities that were hit every day.
+      // Secondary sort by incidents so ties break on total volume.
       env.DB.prepare(`SELECT city, region AS zone,
-          COUNT(DISTINCT msg_id) AS count,
-          COUNT(DISTINCT CASE WHEN alert_type='rockets'     THEN msg_id END) AS rockets,
-          COUNT(DISTINCT CASE WHEN alert_type='uav'         THEN msg_id END) AS uav,
-          COUNT(DISTINCT CASE WHEN alert_type='ballistic'   THEN msg_id END) AS ballistic,
-          COUNT(DISTINCT CASE WHEN alert_type='infiltration' THEN msg_id END) AS infiltration
+          COUNT(DISTINCT DATE(alert_ts))                                                       AS count,
+          COUNT(DISTINCT incident_id)                                                          AS incidents,
+          COUNT(DISTINCT CASE WHEN alert_type='rockets'      THEN incident_id END)             AS rockets,
+          COUNT(DISTINCT CASE WHEN alert_type='uav'          THEN incident_id END)             AS uav,
+          COUNT(DISTINCT CASE WHEN alert_type='ballistic'    THEN incident_id END)             AS ballistic,
+          COUNT(DISTINCT CASE WHEN alert_type='infiltration' THEN incident_id END)             AS infiltration
         FROM tg_alerts ${where}${realAf} AND city != ''
-        GROUP BY city, region ORDER BY count DESC LIMIT 20`).all(),
+        GROUP BY city, region ORDER BY count DESC, incidents DESC LIMIT 20`).all(),
 
       env.DB.prepare(`SELECT CAST(strftime('%H', alert_ts) AS INTEGER) AS hour,
           COUNT(DISTINCT msg_id) AS count
