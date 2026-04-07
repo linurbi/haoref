@@ -340,7 +340,8 @@ async function fetchStats(startDate, endDate) {
   if (endDate)   params.set("endDate",   endDate);
   const qs = [...params].length ? "?" + params.toString() : "";
 
-  const paths = dataMode === "redalert" ? [""] : dataMode === "d1" ? ["/tg-stats"] : ["/tg-stats", ""];
+  // "redalert" → only RedAlert; "d1" → only D1 (no silent fallback, retry handles cold starts)
+  const paths = dataMode === "redalert" ? [""] : ["/tg-stats"];
 
   for (const path of paths) {
     try {
@@ -994,20 +995,48 @@ function showConnectionError() {
   ["kpiTotal","kpiToday","kpiPeak","kpiPeakDate","kpiAreas","kpiAvg"].forEach(id => setText(id, "—"));
 }
 
+let _refreshing = false;
+
 async function refresh() {
+  if (_refreshing) return;          // ignore concurrent clicks
+  _refreshing = true;
+  setLoadingState(true);
   try {
     hideBanner("bannerError");
-    const api   = await fetchStats(currentStartDate, currentEndDate);
+    let api, lastErr;
+    for (let attempt = 0; attempt < 2; attempt++) {   // 1 auto-retry on failure
+      try {
+        api = await fetchStats(currentStartDate, currentEndDate);
+        break;
+      } catch (e) {
+        lastErr = e;
+        if (attempt === 0) await new Promise(r => setTimeout(r, 800));
+      }
+    }
+    if (!api) throw lastErr;
     const stats = buildStats(api);
     renderStats(stats);
-    setSourceBadge("live", "● LIVE · RedAlert API");
+    // Show the actual source that responded
+    const srcLabel = stats.isD1 ? "● LIVE · D1 / טלגרם" : "● LIVE · RedAlert API";
+    setSourceBadge("live", srcLabel);
+    setText("dataSource", stats.isD1 ? "D1 / Telegram" : "RedAlert API");
     hideBanner("bannerProxy");
     resetCountdown();
-    console.log(`[OREF] RedAlert OK — ${stats.total} events since ${currentStartDate}`);
+    console.log(`[OREF] ${stats.isD1 ? "D1" : "RedAlert"} — ${stats.total} events`);
   } catch (err) {
     console.error("Refresh error:", err);
     showConnectionError();
+  } finally {
+    _refreshing = false;
+    setLoadingState(false);
   }
+}
+
+function setLoadingState(on) {
+  document.querySelectorAll(".filter-btn").forEach(b => {
+    b.style.opacity = on ? "0.5" : "";
+    b.style.pointerEvents = on ? "none" : "";
+  });
 }
 
 // ═══════════════════════════════════════════════

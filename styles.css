@@ -180,6 +180,7 @@ main { padding:28px 40px; max-width:1640px; margin:0 auto; }
 .filter-btn.active { background:var(--c1); border-color:var(--c1); color:#000; font-weight:700; box-shadow:0 0 14px rgba(255,136,0,0.45); }
 
 .filter-sep { width:1px; height:20px; background:var(--border); margin:0 4px; flex-shrink:0; }
+.filter-btn[disabled], .filter-btn[style*="pointer-events: none"] { opacity:.45 !important; cursor:not-allowed; }
 .date-range { display:none; align-items:center; gap:8px; flex-wrap:wrap; }
 .date-range input[type="date"] {
   background:var(--surface); border:1px solid var(--border); color:var(--text);
