@@ -49,7 +49,7 @@ async function handleTgStats(url, env) {
   const af    = " AND alert_type NOT IN ('all_clear','unknown')";
 
   try {
-    const [totRow, timelineRows, zoneRows, originRows, peakRow, cityRows] = await Promise.all([
+    const [totRow, timelineRows, zoneRows, originRows, peakRow, cityRows, hourlyRows] = await Promise.all([
       env.DB.prepare(`SELECT
           COUNT(DISTINCT msg_id)      AS range_events,
           COUNT(DISTINCT incident_id) AS incidents,
@@ -85,6 +85,11 @@ async function handleTgStats(url, env) {
           COUNT(DISTINCT msg_id) AS count
         FROM tg_alerts ${where}${af} AND city != ''
         GROUP BY city ORDER BY count DESC LIMIT 15`).all(),
+
+      env.DB.prepare(`SELECT CAST(strftime('%H', alert_ts) AS INTEGER) AS hour,
+          COUNT(DISTINCT msg_id) AS count
+        FROM tg_alerts ${where}${af}
+        GROUP BY hour ORDER BY hour`).all(),
     ]);
 
     const result = {
@@ -97,6 +102,7 @@ async function handleTgStats(url, env) {
       topOrigins:   originRows.results.map(r => ({ origin: r.alert_type, count: r.count, incidents: r.incidents })),
       topCities:    cityRows.results,
       peak:         peakRow || {},
+      hourly:       hourlyRows.results,
     };
 
     return json(result, 200, "max-age=120, s-maxage=120");
