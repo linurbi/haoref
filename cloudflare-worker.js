@@ -91,28 +91,30 @@ async function handleTgStats(request, url) {
   var alertFilter = " AND alert_type NOT IN ('all_clear','unknown')";
 
   try {
-    // All queries in parallel — COUNT(DISTINCT msg_id) = unique siren activations
+    // All queries in parallel
+    // COUNT(DISTINCT msg_id)       = unique siren activations (one Telegram post = one siren event)
+    // COUNT(DISTINCT incident_id)  = estimated launch/incident clusters (nearby events merged)
     var [totRow, timelineRows, zoneRows, originRows, peakRow, cityRows] = await Promise.all([
-      // totals: unique siren events + raw city-activation rows
-      DB.prepare("SELECT COUNT(DISTINCT msg_id) AS range_events, COUNT(*) AS city_activations FROM tg_alerts " + where + alertFilter).first(),
-      // daily timeline — distinct siren events per day
-      DB.prepare("SELECT DATE(alert_ts) AS period, COUNT(DISTINCT msg_id) AS count FROM tg_alerts " + where + alertFilter + " GROUP BY DATE(alert_ts) ORDER BY period").all(),
-      // top zones — distinct siren events per region
-      DB.prepare("SELECT region AS zone, COUNT(DISTINCT msg_id) AS count FROM tg_alerts " + where + alertFilter + " AND region != '' GROUP BY region ORDER BY count DESC LIMIT 20").all(),
-      // top origins — grouped by alert_type (rockets / uav / ballistic / pre_alert / ...)
-      DB.prepare("SELECT alert_type, COUNT(DISTINCT msg_id) AS count FROM tg_alerts " + where + alertFilter + " GROUP BY alert_type ORDER BY count DESC").all(),
+      // totals
+      DB.prepare("SELECT COUNT(DISTINCT msg_id) AS range_events, COUNT(DISTINCT incident_id) AS incidents, COUNT(*) AS city_activations FROM tg_alerts " + where + alertFilter).first(),
+      // daily timeline — siren events per day
+      DB.prepare("SELECT DATE(alert_ts) AS period, COUNT(DISTINCT msg_id) AS count, COUNT(DISTINCT incident_id) AS incidents FROM tg_alerts " + where + alertFilter + " GROUP BY DATE(alert_ts) ORDER BY period").all(),
+      // top zones — siren events per region
+      DB.prepare("SELECT region AS zone, COUNT(DISTINCT msg_id) AS count, COUNT(DISTINCT incident_id) AS incidents FROM tg_alerts " + where + alertFilter + " AND region != '' GROUP BY region ORDER BY count DESC LIMIT 20").all(),
+      // breakdown by alert_type — both siren events and estimated incidents
+      DB.prepare("SELECT alert_type, COUNT(DISTINCT msg_id) AS count, COUNT(DISTINCT incident_id) AS incidents FROM tg_alerts " + where + alertFilter + " GROUP BY alert_type ORDER BY count DESC").all(),
       // peak hour — busiest 1-hour window
       DB.prepare("SELECT SUBSTR(alert_ts,1,13)||':00:00Z' AS period, COUNT(DISTINCT msg_id) AS count FROM tg_alerts " + where + alertFilter + " GROUP BY SUBSTR(alert_ts,1,13) ORDER BY count DESC LIMIT 1").first(),
-      // top 15 cities by unique siren events
+      // top 15 cities
       DB.prepare("SELECT city, region AS zone, COUNT(DISTINCT msg_id) AS count FROM tg_alerts " + where + alertFilter + " AND city != '' GROUP BY city ORDER BY count DESC LIMIT 15").all(),
     ]);
 
     var result = {
       source:      "d1-telegram",
-      totals:      { range: totRow.range_events, cityActivations: totRow.city_activations },
+      totals:      { range: totRow.range_events, incidents: totRow.incidents, cityActivations: totRow.city_activations },
       timeline:    timelineRows.results,
       topZones:    zoneRows.results,
-      topOrigins:  originRows.results.map(function(r) { return { origin: r.alert_type, count: r.count }; }),
+      topOrigins:  originRows.results.map(function(r) { return { origin: r.alert_type, count: r.count, incidents: r.incidents }; }),
       topCities:   cityRows.results,
       peak:        peakRow || {},
     };
