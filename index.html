@@ -133,7 +133,7 @@
       <div class="kpi-cell c1">
         <div class="kpi-lbl">סה"כ אירועי אזעקה</div>
         <div class="kpi-num" id="kpiTotal">—</div>
-        <div class="kpi-sub" id="kpiTotalSub">אירועים ייחודיים · לא היטי ערים</div>
+        <div class="kpi-sub" id="kpiTotalSub">אירועים ייחודיים</div>
       </div>
       <div class="kpi-cell c2">
         <div class="kpi-lbl">אזעקות היום</div>
@@ -213,7 +213,7 @@
       <div class="chart-wrap tall"><canvas id="chartAreas" aria-label="גרף יישובים מותקפים ביותר"></canvas></div>
     </div>
     <div class="chart-card">
-      <div class="card-title"><div class="dot" aria-hidden="true"></div>התפלגות לפי אזור <span class="card-unit">(היטי ערים)</span></div>
+      <div class="card-title"><div class="dot" aria-hidden="true"></div>התפלגות לפי אזור <span class="card-unit">(אירועים ייחודיים)</span></div>
       <div class="chart-wrap tall"><canvas id="chartRegions" aria-label="גרף התפלגות לפי אזור"></canvas></div>
     </div>
   </div>
@@ -662,7 +662,7 @@ function drawRegions(topRegions) {
       indexAxis: "y",
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false }, tooltip: { callbacks: {
-        label: (i) => ` ${i.raw.toLocaleString("he-IL")} אזעקות`,
+        label: (i) => ` ${i.raw.toLocaleString("he-IL")} אירועים ייחודיים`,
       }}},
       scales: {
         x: axisY(),
