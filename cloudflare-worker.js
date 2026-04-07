@@ -50,10 +50,10 @@ async function handleTgStats(url, env) {
   const af    = " AND alert_type NOT IN ('all_clear','unknown')";
 
   try {
-    const rocketAf = " AND alert_type = 'rockets'";
-    const uavAf    = " AND alert_type = 'uav'";
+    // Real-alert filter: rockets + UAV + ballistic + infiltration (excludes pre_alert noise)
+    const realAf = " AND alert_type IN ('rockets','uav','ballistic','infiltration')";
 
-    const [totRow, timelineRows, zoneRows, originRows, peakRow, cityRows, cityRocketRows, cityUavRows, hourlyRows] = await Promise.all([
+    const [totRow, timelineRows, zoneRows, originRows, peakRow, cityRows, hourlyRows] = await Promise.all([
       env.DB.prepare(`SELECT
           COUNT(DISTINCT msg_id)      AS range_events,
           COUNT(DISTINCT incident_id) AS incidents,
@@ -85,20 +85,15 @@ async function handleTgStats(url, env) {
         FROM tg_alerts ${where}${af}
         GROUP BY SUBSTR(alert_ts,1,13) ORDER BY count DESC LIMIT 1`).first(),
 
+      // Per (city, zone): count rockets + UAV combined, with per-type breakdown
       env.DB.prepare(`SELECT city, region AS zone,
-          COUNT(DISTINCT msg_id) AS count
-        FROM tg_alerts ${where}${af} AND city != ''
-        GROUP BY city ORDER BY count DESC LIMIT 15`).all(),
-
-      env.DB.prepare(`SELECT city, region AS zone,
-          COUNT(DISTINCT msg_id) AS count
-        FROM tg_alerts ${where}${rocketAf} AND city != ''
-        GROUP BY city ORDER BY count DESC LIMIT 15`).all(),
-
-      env.DB.prepare(`SELECT city, region AS zone,
-          COUNT(DISTINCT msg_id) AS count
-        FROM tg_alerts ${where}${uavAf} AND city != ''
-        GROUP BY city ORDER BY count DESC LIMIT 15`).all(),
+          COUNT(DISTINCT msg_id) AS count,
+          COUNT(DISTINCT CASE WHEN alert_type='rockets'     THEN msg_id END) AS rockets,
+          COUNT(DISTINCT CASE WHEN alert_type='uav'         THEN msg_id END) AS uav,
+          COUNT(DISTINCT CASE WHEN alert_type='ballistic'   THEN msg_id END) AS ballistic,
+          COUNT(DISTINCT CASE WHEN alert_type='infiltration' THEN msg_id END) AS infiltration
+        FROM tg_alerts ${where}${realAf} AND city != ''
+        GROUP BY city, region ORDER BY count DESC LIMIT 20`).all(),
 
       env.DB.prepare(`SELECT CAST(strftime('%H', alert_ts) AS INTEGER) AS hour,
           COUNT(DISTINCT msg_id) AS count
@@ -114,11 +109,9 @@ async function handleTgStats(url, env) {
       timeline:     timelineRows.results,
       topZones:     zoneRows.results,
       topOrigins:   originRows.results.map(r => ({ origin: r.alert_type, count: r.count, incidents: r.incidents })),
-      topCities:        cityRows.results,
-      topCitiesRockets: cityRocketRows.results,
-      topCitiesUAV:     cityUavRows.results,
-      peak:             peakRow || {},
-      hourly:           hourlyRows.results,
+      topCities: cityRows.results,   // rockets+uav combined, per (city,zone)
+      peak:      peakRow || {},
+      hourly:    hourlyRows.results,
     };
 
     return json(result, 200, "max-age=120, s-maxage=120");

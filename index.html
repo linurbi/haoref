@@ -182,16 +182,13 @@
     </div>
   </div>
 
-  <!-- Row 2: Top cities rockets + Top cities UAV -->
+  <!-- Row 2: Top cities (rockets + UAV combined) + Region distribution -->
   <div class="charts-grid">
-    <div class="chart-card">
-      <div class="card-title"><div class="dot" style="background:#ff4422" aria-hidden="true"></div>יישובים — ירי רקטות וטילים <span class="card-unit">Top 15</span></div>
-      <div class="chart-wrap tall"><canvas id="chartAreas" aria-label="גרף יישובים - ירי רקטות"></canvas></div>
+    <div class="chart-card" style="grid-column: span 2">
+      <div class="card-title"><div class="dot" aria-hidden="true"></div>יישובים מותקפים ביותר — רקטות + כלי טיס <span class="card-unit">Top 20 · לפי אזור</span></div>
+      <div class="chart-wrap tall wide"><canvas id="chartAreas" aria-label="גרף יישובים מותקפים ביותר"></canvas></div>
     </div>
-    <div class="chart-card">
-      <div class="card-title"><div class="dot" style="background:#00ccff" aria-hidden="true"></div>יישובים — כלי טיס עוין (ערי הצפון) <span class="card-unit">Top 15</span></div>
-      <div class="chart-wrap tall"><canvas id="chartRegions" aria-label="גרף יישובים - כלי טיס עוין"></canvas></div>
-    </div>
+    <canvas id="chartRegions" style="display:none"></canvas>
   </div>
 
   <!-- Row 3: MOH Casualties by severity -->
@@ -483,10 +480,9 @@ let countdownInterval = null;
 // MAP API RESPONSE → DISPLAY STATS
 // ═══════════════════════════════════════════════
 function buildStats(api) {
-  const timeline        = api.timeline        || [];
-  const topCities       = api.topCitiesRockets || api.topCities || [];
-  const topCitiesUAV    = api.topCitiesUAV    || [];
-  const topZones        = api.topZones        || [];
+  const timeline    = api.timeline    || [];
+  const topCities   = api.topCities   || [];
+  const topZones    = api.topZones    || [];
   const topOrigins      = api.topOrigins      || [];
   const totals      = api.totals      || {};
   const isD1        = api.source === "d1-telegram";
@@ -551,7 +547,6 @@ function buildStats(api) {
     byDay,
     hourly,
     topCities,
-    topCitiesUAV,
     topZones,
     topOrigins,
     isD1,
@@ -704,57 +699,79 @@ function drawOriginsBar(topOrigins) {
   });
 }
 
-// ── Top UAV cities (northern border) ──
-function drawRegions(topCitiesUAV) {
-  if (!topCitiesUAV || topCitiesUAV.length === 0) return;
-  const items = topCitiesUAV.map(a => Array.isArray(a) ? { city: a[0], count: a[1] } : a);
-  buildOrUpdate("chartRegions", {
-    type: "bar",
-    data: {
-      labels: items.map(a => a.city?.length > 18 ? a.city.slice(0, 18) + "…" : (a.city || a.zone || "")),
-      datasets: [{
-        data: items.map(a => a.count),
-        backgroundColor: items.map((_, i) =>
-          `hsla(${185 + (i / items.length) * 40}, 80%, 55%, 0.7)`),
-        borderRadius: 4,
-      }],
-    },
-    options: {
-      indexAxis: "y",
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false }, tooltip: { callbacks: {
-        title: ([i]) => items[i.dataIndex]?.zone || "",
-        label: (i) => ` ${i.raw.toLocaleString("he-IL")} אירועים`,
-      }}},
-      scales: {
-        x: axisY(),
-        y: axisX({ ticks: { font: { size: 11 } } }),
-      },
-    },
-  });
-}
+// drawRegions is retired — chart canvas is hidden; zone data shown via origin cards
+function drawRegions() {}
 
-// ── Top-15 areas horizontal bar ──
+// ── Top cities stacked bar: rockets (orange) + UAV (cyan) per (city, zone) ──
 function drawAreas(topAreas) {
-  // Accept both [{city,count}] (API) and [[city,count]] (legacy)
-  const items = topAreas.map(a => Array.isArray(a) ? { city: a[0], count: a[1] } : a);
+  if (!topAreas || topAreas.length === 0) return;
+  const items = topAreas.map(a => Array.isArray(a) ? { city: a[0], count: a[1], rockets: a[1], uav: 0 } : a);
+
+  // Label: city name, tooltip shows zone
+  const labels   = items.map(a => {
+    const name = a.city || "";
+    return name.length > 20 ? name.slice(0, 20) + "…" : name;
+  });
+  const rocketVals = items.map(a => a.rockets || 0);
+  const uavVals    = items.map(a => a.uav     || 0);
+  const hasTypes   = items.some(a => (a.rockets || 0) + (a.uav || 0) > 0);
+
   buildOrUpdate("chartAreas", {
     type: "bar",
     data: {
-      labels: items.map(a => a.city.length > 18 ? a.city.slice(0, 18) + "…" : a.city),
-      datasets: [{
-        data: items.map(a => a.count),
-        backgroundColor: items.map((_, i) =>
-          `hsla(${15 + (i / items.length) * 30}, 90%, 55%, 0.7)`),
+      labels,
+      datasets: hasTypes ? [
+        {
+          label:           "ירי רקטות",
+          data:            rocketVals,
+          backgroundColor: "rgba(255,68,34,0.65)",
+          borderColor:     "rgba(255,100,60,0.9)",
+          borderWidth:     1,
+          borderRadius:    0,
+          stack:           "city",
+        },
+        {
+          label:           "כלי טיס עוין",
+          data:            uavVals,
+          backgroundColor: "rgba(0,204,255,0.65)",
+          borderColor:     "rgba(0,220,255,0.9)",
+          borderWidth:     1,
+          borderRadius:    3,
+          stack:           "city",
+        },
+      ] : [{
+        label:           "אירועים",
+        data:            items.map(a => a.count),
+        backgroundColor: items.map((_, i) => `hsla(${15 + (i/items.length)*30},90%,55%,0.7)`),
         borderRadius: 4,
+        stack: "city",
       }],
     },
     options: {
       indexAxis: "y",
       responsive: true, maintainAspectRatio: false,
-      plugins: { tooltip: { callbacks: {
-        label: (i) => ` ${i.raw.toLocaleString("he-IL")} אזעקות`,
-      }}},
+      plugins: {
+        legend: {
+          display: hasTypes,
+          labels: { color: "rgba(255,255,255,0.6)", font: { size: 11 }, boxWidth: 12, padding: 14 },
+        },
+        tooltip: { callbacks: {
+          title: ([i]) => {
+            const item = items[i.dataIndex];
+            return item ? `${item.city || ""}  ·  ${(item.zone || "").replace(/^אזור\s+/,"")}` : "";
+          },
+          afterBody: (items_) => {
+            const item = items[items_[0].dataIndex];
+            if (!item) return [];
+            const lines = [];
+            if (item.rockets)     lines.push(`🚀 רקטות: ${item.rockets.toLocaleString("he-IL")}`);
+            if (item.uav)         lines.push(`✈️  כלי טיס: ${item.uav.toLocaleString("he-IL")}`);
+            if (item.ballistic)   lines.push(`💥 בליסטי: ${item.ballistic.toLocaleString("he-IL")}`);
+            lines.push(`סה"כ: ${(item.count || 0).toLocaleString("he-IL")}`);
+            return lines;
+          },
+        }},
+      },
       scales: {
         x: axisY(),
         y: axisX({ ticks: { font: { size: 11 } } }),
@@ -983,7 +1000,7 @@ function renderStats(stats) {
     drawOriginsBar(stats.topOrigins);
   }
   drawAreas(stats.topCities);
-  drawRegions(stats.isD1 ? stats.topCitiesUAV : stats.topZones);
+  drawRegions();
   drawThreats(stats.topOrigins);
   drawWeapons(stats.topOrigins);
   // drawCasualtiesChart is driven by MOH daily fetch, not by stats refresh

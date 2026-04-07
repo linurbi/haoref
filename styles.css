@@ -352,6 +352,7 @@ main { padding:28px 40px; max-width:1640px; margin:0 auto; }
 
 .chart-wrap        { position:relative; height:240px; }
 .chart-wrap.tall   { height:320px; }
+.chart-wrap.tall.wide { height:460px; }
 .chart-wrap.scroll { height:320px; overflow-y:auto; }
 
 /* ════════════════════════ ORIGIN PILLS ════════════════════════ */
