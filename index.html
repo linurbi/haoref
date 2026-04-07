@@ -160,9 +160,9 @@
     <!-- Row B: supplemental stats -->
     <div class="kpi-bar kpi-bar-bot">
       <div class="kpi-cell c6">
-        <div class="kpi-lbl">כטב"מ · בליסטי</div>
+        <div class="kpi-lbl" id="kpiRealLbl">אירועי ירי</div>
         <div class="kpi-num" id="kpiReal">—</div>
-        <div class="kpi-sub">תימן · איראן</div>
+        <div class="kpi-sub" id="kpiRealSub">אירועים משוערים</div>
       </div>
       <div class="kpi-cell c7">
         <div class="kpi-lbl">7 ימים אחרונים</div>
@@ -354,19 +354,27 @@ function drawCasualties(cas) {
   `).join("");
 }
 
-// ── Fetch stats from CF Worker → RedAlert API ────────────────────────────────
+// ── Fetch stats — D1/tg-stats first, fall back to RedAlert proxy ──────────────
 async function fetchStats(startDate, endDate) {
-  let url = CF_WORKER_URL;
   const params = new URLSearchParams();
   if (startDate) params.set("startDate", startDate);
   if (endDate)   params.set("endDate",   endDate);
-  if ([...params].length) url += "?" + params.toString();
+  const qs = [...params].length ? "?" + params.toString() : "";
 
-  const resp = await fetch(url, { cache: "no-store" });
-  if (!resp.ok) throw new Error(`Worker HTTP ${resp.status}`);
-  const data = await resp.json();
-  if (data.error) throw new Error(data.error);
-  return data;
+  // Try our own D1 data first; fall back to RedAlert proxy if it's back online
+  for (const path of ["/tg-stats", ""]) {
+    try {
+      const resp = await fetch(CF_WORKER_URL + path + qs, { cache: "no-store" });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      if (data.error) throw new Error(data.error);
+      console.info("Stats source:", data.source || "redalert");
+      return data;
+    } catch (e) {
+      console.warn(`Stats source "${path || "redalert"}" failed:`, e.message);
+    }
+  }
+  throw new Error("All stats sources failed");
 }
 
 // ── Animated counter ─────────────────────────────────────────────────────────
@@ -383,27 +391,49 @@ function countUp(el, target, duration = 1400) {
   requestAnimationFrame(step);
 }
 
-// ── Origin → Hebrew label map ─────────────────────────────────────────────────
+// ── Origin → Hebrew label map (RedAlert keys + D1 alert_type keys) ────────────
 const ORIGIN_LABELS = {
-  lebanon: "לבנון (חיזבאללה)",
-  iran:    "איראן",
-  gaza:    "עזה (חמאס)",
-  yemen:   "תימן (חות'ים)",
-  fa:      "גדה המערבית",
-  hamas:   "חמאס",
-  isis:    "דאעש",
+  // RedAlert / country-based
+  lebanon:     "לבנון (חיזבאללה)",
+  iran:        "איראן",
+  gaza:        "עזה (חמאס)",
+  yemen:       "תימן (חות'ים)",
+  fa:          "גדה המערבית",
+  hamas:       "חמאס",
+  isis:        "דאעש",
+  // D1 alert_type based
+  rockets:     "ירי רקטות וטילים",
+  uav:         "כלי טיס עוין",
+  ballistic:   "טיל בליסטי",
+  pre_alert:   "מבזק",
+  earthquake:  "רעידת אדמה",
+  infiltration:"חדירת מחבלים",
+  hazmat:      "חומרים מסוכנים",
+  wildfire:    "שריפה",
+  tsunami:     "צונאמי",
 };
 function originLabel(o) { return ORIGIN_LABELS[o] || o; }
 
 // ── Origin card colors ────────────────────────────────────────────────────────
 const ORIGIN_CARD_COLORS = {
-  lebanon: "#00ffaa",
-  iran:    "#cc44ff",
-  gaza:    "#ff2255",
-  yemen:   "#ffcc00",
-  fa:      "#ff8800",
-  hamas:   "#ff2255",
-  isis:    "#666688",
+  // RedAlert
+  lebanon:     "#00ffaa",
+  iran:        "#cc44ff",
+  gaza:        "#ff2255",
+  yemen:       "#ffcc00",
+  fa:          "#ff8800",
+  hamas:       "#ff2255",
+  isis:        "#666688",
+  // D1 alert_type
+  rockets:     "#ff4422",
+  uav:         "#00ccff",
+  ballistic:   "#cc44ff",
+  pre_alert:   "#ffaa00",
+  earthquake:  "#44ff88",
+  infiltration:"#ff2266",
+  hazmat:      "#88ff00",
+  wildfire:    "#ff6600",
+  tsunami:     "#0066ff",
 };
 
 // ── Draw hero origin cards ────────────────────────────────────────────────────
@@ -476,10 +506,8 @@ function buildStats(api) {
   const topCities   = api.topCities   || [];
   const topZones    = api.topZones    || [];
   const topOrigins  = api.topOrigins  || [];
-  const peak        = api.peak        || {};
   const totals      = api.totals      || {};
-  // Pre-alerts: try several field names the API might use
-  const preAlerts   = totals.preAlerts ?? totals.earlyWarnings ?? totals.preWarnings ?? totals.warnings ?? null;
+  const isD1        = api.source === "d1-telegram";
 
   // Daily sorted array [[date, count], ...]
   const byDay = timeline
@@ -487,24 +515,34 @@ function buildStats(api) {
     .sort((a, b) => a.period.localeCompare(b.period))
     .map(t => [t.period, t.count]);
 
-  // All daily metrics use timeline counts (unique alarm events, not city-activations)
-  // so total, today, peak, and avg are always the same unit.
   const timelineTotal = byDay.reduce((s, e) => s + e[1], 0);
   const avgPerDay     = byDay.length ? Math.round(timelineTotal / byDay.length) : 0;
+  const peakEntry     = byDay.reduce((m, e) => (e[1] > m[1] ? e : m), ["", 0]);
 
-  const peakEntry = byDay.reduce((m, e) => (e[1] > m[1] ? e : m), ["", 0]);
-
-  // "Today" = the timeline entry whose period matches today's date (Israel = UTC+3)
+  // "Today" = Israel time (UTC+3)
   const nowIL    = new Date(Date.now() + 3 * 3_600_000);
   const todayStr = nowIL.toISOString().split("T")[0];
-  const todayEntry  = byDay.find(e => e[0].startsWith(todayStr));
-  const todayCount  = todayEntry ? todayEntry[1] : 0;
+  const todayEntry = byDay.find(e => e[0].startsWith(todayStr));
+  const todayCount = todayEntry ? todayEntry[1] : 0;
 
-  // Origins: Iran + Yemen = ballistic proxy
+  // last7d / last30d: compute from timeline (works for both D1 and RedAlert)
+  const last7d  = totals.last7d  || byDay.slice(-7).reduce((s, e)  => s + e[1], 0);
+  const last30d = totals.last30d || byDay.slice(-30).reduce((s, e) => s + e[1], 0);
+
+  // Unique cities / zones
+  const uniqueAreas = api.uniqueCities || 0;
+  const uniqueZones = api.uniqueZones  || topZones.length || 0;
+
+  // Incidents (estimated launch clusters) — D1 only
+  const incidents = totals.incidents || 0;
+
+  // "Real" threats: ballistic for D1, or Iran+Yemen for RedAlert
   const ballisticOrigins = ["iran", "yemen", "fa"];
-  const realAlerts = topOrigins
-    .filter(o => ballisticOrigins.includes(o.origin))
-    .reduce((s, o) => s + o.count, 0);
+  const realAlerts = isD1
+    ? (topOrigins.find(o => o.origin === "ballistic")?.count || 0) +
+      (topOrigins.find(o => o.origin === "uav")?.count || 0)
+    : topOrigins.filter(o => ballisticOrigins.includes(o.origin))
+                .reduce((s, o) => s + o.count, 0);
 
   const OP_START_DATE = new Date("2026-02-28T00:00:00Z");
   const opDays = Math.floor((Date.now() - OP_START_DATE.getTime()) / 86400000);
@@ -512,10 +550,11 @@ function buildStats(api) {
   return {
     total:       timelineTotal,
     today:       todayCount,
-    last7d:      totals.last7d    || 0,
-    last30d:     totals.last30d   || 0,
-    uniqueAreas: api.uniqueCities || 0,
-    uniqueZones: api.uniqueZones  || 0,
+    last7d,
+    last30d,
+    uniqueAreas,
+    uniqueZones,
+    incidents,
     realAlerts,
     opDays,
     peakDay:     peakEntry,
@@ -524,6 +563,7 @@ function buildStats(api) {
     topCities,
     topZones,
     topOrigins,
+    isD1,
   };
 }
 
@@ -538,11 +578,20 @@ function updateKPIs(stats) {
   anim("kpiPeak",   stats.peakDay[1]);
   anim("kpiAreas",  stats.uniqueAreas);
   anim("kpiAvg",    stats.avgPerDay);
-  anim("kpiReal",   stats.realAlerts);
+  anim("kpiReal",   stats.isD1 ? stats.incidents : stats.realAlerts);
   anim("kpiMevazek", stats.last7d);
   anim("kpiOpDays",  stats.opDays);
   anim("kpiZones",   stats.uniqueZones);
   anim("kpiLast30",  stats.last30d);
+
+  // Update dynamic labels based on source
+  if (stats.isD1) {
+    setText("kpiRealLbl", "אירועי ירי משוערים");
+    setText("kpiRealSub", "לפי קיבוץ אזעקות");
+  } else {
+    setText("kpiRealLbl", 'כטב"מ · בליסטי');
+    setText("kpiRealSub", "תימן · איראן");
+  }
 
   // Dynamic sub-labels so units are always clear
   const isFiltered = currentStartDate !== OP_START || currentEndDate !== "";

@@ -95,8 +95,8 @@ async function handleTgStats(request, url) {
     // COUNT(DISTINCT msg_id)       = unique siren activations (one Telegram post = one siren event)
     // COUNT(DISTINCT incident_id)  = estimated launch/incident clusters (nearby events merged)
     var [totRow, timelineRows, zoneRows, originRows, peakRow, cityRows] = await Promise.all([
-      // totals
-      DB.prepare("SELECT COUNT(DISTINCT msg_id) AS range_events, COUNT(DISTINCT incident_id) AS incidents, COUNT(*) AS city_activations FROM tg_alerts " + where + alertFilter).first(),
+      // totals + unique city/zone counts
+      DB.prepare("SELECT COUNT(DISTINCT msg_id) AS range_events, COUNT(DISTINCT incident_id) AS incidents, COUNT(*) AS city_activations, COUNT(DISTINCT city) AS unique_cities, COUNT(DISTINCT region) AS unique_zones FROM tg_alerts " + where + alertFilter).first(),
       // daily timeline — siren events per day
       DB.prepare("SELECT DATE(alert_ts) AS period, COUNT(DISTINCT msg_id) AS count, COUNT(DISTINCT incident_id) AS incidents FROM tg_alerts " + where + alertFilter + " GROUP BY DATE(alert_ts) ORDER BY period").all(),
       // top zones — siren events per region
@@ -110,8 +110,10 @@ async function handleTgStats(request, url) {
     ]);
 
     var result = {
-      source:      "d1-telegram",
-      totals:      { range: totRow.range_events, incidents: totRow.incidents, cityActivations: totRow.city_activations },
+      source:       "d1-telegram",
+      uniqueCities: totRow.unique_cities,
+      uniqueZones:  totRow.unique_zones,
+      totals:       { range: totRow.range_events, incidents: totRow.incidents, cityActivations: totRow.city_activations },
       timeline:    timelineRows.results,
       topZones:    zoneRows.results,
       topOrigins:  originRows.results.map(function(r) { return { origin: r.alert_type, count: r.count, incidents: r.incidents }; }),
