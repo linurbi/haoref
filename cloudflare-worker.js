@@ -30,6 +30,7 @@ export default {
     if (pathname.endsWith("/casualties"))       return handleMohEndpoint(MOH_CASUALTIES, 1800);
     if (pathname.endsWith("/daily-casualties")) return handleMohEndpoint(MOH_DAILY_CASUALTIES, 1800);
     if (pathname.endsWith("/tg-stats"))         return handleTgStats(url, env);
+    if (pathname.endsWith("/incidents"))        return handleIncidents(url, env);
 
     // Default: proxy RedAlert
     return handleRedAlert(url, env);
@@ -49,7 +50,10 @@ async function handleTgStats(url, env) {
   const af    = " AND alert_type NOT IN ('all_clear','unknown')";
 
   try {
-    const [totRow, timelineRows, zoneRows, originRows, peakRow, cityRows, hourlyRows] = await Promise.all([
+    const rocketAf = " AND alert_type = 'rockets'";
+    const uavAf    = " AND alert_type = 'uav'";
+
+    const [totRow, timelineRows, zoneRows, originRows, peakRow, cityRows, cityRocketRows, cityUavRows, hourlyRows] = await Promise.all([
       env.DB.prepare(`SELECT
           COUNT(DISTINCT msg_id)      AS range_events,
           COUNT(DISTINCT incident_id) AS incidents,
@@ -86,6 +90,16 @@ async function handleTgStats(url, env) {
         FROM tg_alerts ${where}${af} AND city != ''
         GROUP BY city ORDER BY count DESC LIMIT 15`).all(),
 
+      env.DB.prepare(`SELECT city, region AS zone,
+          COUNT(DISTINCT msg_id) AS count
+        FROM tg_alerts ${where}${rocketAf} AND city != ''
+        GROUP BY city ORDER BY count DESC LIMIT 15`).all(),
+
+      env.DB.prepare(`SELECT city, region AS zone,
+          COUNT(DISTINCT msg_id) AS count
+        FROM tg_alerts ${where}${uavAf} AND city != ''
+        GROUP BY city ORDER BY count DESC LIMIT 15`).all(),
+
       env.DB.prepare(`SELECT CAST(strftime('%H', alert_ts) AS INTEGER) AS hour,
           COUNT(DISTINCT msg_id) AS count
         FROM tg_alerts ${where}${af}
@@ -100,12 +114,33 @@ async function handleTgStats(url, env) {
       timeline:     timelineRows.results,
       topZones:     zoneRows.results,
       topOrigins:   originRows.results.map(r => ({ origin: r.alert_type, count: r.count, incidents: r.incidents })),
-      topCities:    cityRows.results,
-      peak:         peakRow || {},
-      hourly:       hourlyRows.results,
+      topCities:        cityRows.results,
+      topCitiesRockets: cityRocketRows.results,
+      topCitiesUAV:     cityUavRows.results,
+      peak:             peakRow || {},
+      hourly:           hourlyRows.results,
     };
 
     return json(result, 200, "max-age=120, s-maxage=120");
+  } catch (e) {
+    return json({ error: e.message }, 503);
+  }
+}
+
+// ── /incidents — proxy RedAlert incident analysis ────────────────────────────
+async function handleIncidents(url, env) {
+  const params = new URLSearchParams(url.search);
+  const apiUrl = REDALERT_BASE + "/api/stats/incidents?" + params.toString();
+  try {
+    const resp = await fetch(apiUrl, {
+      headers: { "Authorization": "Bearer " + env.REDALERT_KEY, "Accept": "application/json" },
+    });
+    if (!resp.ok) throw new Error("RedAlert incidents API " + resp.status);
+    const body = await resp.text();
+    return new Response(body, {
+      status: 200,
+      headers: { ...CORS, "Content-Type": "application/json; charset=utf-8", "Cache-Control": "max-age=300, s-maxage=300" },
+    });
   } catch (e) {
     return json({ error: e.message }, 503);
   }

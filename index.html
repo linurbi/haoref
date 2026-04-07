@@ -182,15 +182,15 @@
     </div>
   </div>
 
-  <!-- Row 2: Top cities + Region distribution -->
+  <!-- Row 2: Top cities rockets + Top cities UAV -->
   <div class="charts-grid">
     <div class="chart-card">
-      <div class="card-title"><div class="dot" aria-hidden="true"></div>יישובים מותקפים ביותר — Top 15 <span class="card-unit">(היטי ערים)</span></div>
-      <div class="chart-wrap tall"><canvas id="chartAreas" aria-label="גרף יישובים מותקפים ביותר"></canvas></div>
+      <div class="card-title"><div class="dot" style="background:#ff4422" aria-hidden="true"></div>יישובים — ירי רקטות וטילים <span class="card-unit">Top 15</span></div>
+      <div class="chart-wrap tall"><canvas id="chartAreas" aria-label="גרף יישובים - ירי רקטות"></canvas></div>
     </div>
     <div class="chart-card">
-      <div class="card-title"><div class="dot" aria-hidden="true"></div>התפלגות לפי אזור <span class="card-unit">(אירועים ייחודיים)</span></div>
-      <div class="chart-wrap tall"><canvas id="chartRegions" aria-label="גרף התפלגות לפי אזור"></canvas></div>
+      <div class="card-title"><div class="dot" style="background:#00ccff" aria-hidden="true"></div>יישובים — כלי טיס עוין (ערי הצפון) <span class="card-unit">Top 15</span></div>
+      <div class="chart-wrap tall"><canvas id="chartRegions" aria-label="גרף יישובים - כלי טיס עוין"></canvas></div>
     </div>
   </div>
 
@@ -483,10 +483,11 @@ let countdownInterval = null;
 // MAP API RESPONSE → DISPLAY STATS
 // ═══════════════════════════════════════════════
 function buildStats(api) {
-  const timeline    = api.timeline    || [];
-  const topCities   = api.topCities   || [];
-  const topZones    = api.topZones    || [];
-  const topOrigins  = api.topOrigins  || [];
+  const timeline        = api.timeline        || [];
+  const topCities       = api.topCitiesRockets || api.topCities || [];
+  const topCitiesUAV    = api.topCitiesUAV    || [];
+  const topZones        = api.topZones        || [];
+  const topOrigins      = api.topOrigins      || [];
   const totals      = api.totals      || {};
   const isD1        = api.source === "d1-telegram";
 
@@ -550,6 +551,7 @@ function buildStats(api) {
     byDay,
     hourly,
     topCities,
+    topCitiesUAV,
     topZones,
     topOrigins,
     isD1,
@@ -702,18 +704,18 @@ function drawOriginsBar(topOrigins) {
   });
 }
 
-// ── Region distribution horizontal bar ──
-function drawRegions(topRegions) {
-  if (!topRegions || topRegions.length === 0) return;
-  const items = topRegions.map(r => Array.isArray(r) ? { zone: r[0], count: r[1] } : r);
+// ── Top UAV cities (northern border) ──
+function drawRegions(topCitiesUAV) {
+  if (!topCitiesUAV || topCitiesUAV.length === 0) return;
+  const items = topCitiesUAV.map(a => Array.isArray(a) ? { city: a[0], count: a[1] } : a);
   buildOrUpdate("chartRegions", {
     type: "bar",
     data: {
-      labels: items.map(r => r.zone.replace(/^אזור\s+/, "")),
+      labels: items.map(a => a.city?.length > 18 ? a.city.slice(0, 18) + "…" : (a.city || a.zone || "")),
       datasets: [{
-        data: items.map(r => r.count),
+        data: items.map(a => a.count),
         backgroundColor: items.map((_, i) =>
-          `hsla(${200 + (i / items.length) * 120}, 70%, 55%, 0.75)`),
+          `hsla(${185 + (i / items.length) * 40}, 80%, 55%, 0.7)`),
         borderRadius: 4,
       }],
     },
@@ -721,7 +723,8 @@ function drawRegions(topRegions) {
       indexAxis: "y",
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false }, tooltip: { callbacks: {
-        label: (i) => ` ${i.raw.toLocaleString("he-IL")} אירועים ייחודיים`,
+        title: ([i]) => items[i.dataIndex]?.zone || "",
+        label: (i) => ` ${i.raw.toLocaleString("he-IL")} אירועים`,
       }}},
       scales: {
         x: axisY(),
@@ -980,7 +983,7 @@ function renderStats(stats) {
     drawOriginsBar(stats.topOrigins);
   }
   drawAreas(stats.topCities);
-  drawRegions(stats.topZones);
+  drawRegions(stats.isD1 ? stats.topCitiesUAV : stats.topZones);
   drawThreats(stats.topOrigins);
   drawWeapons(stats.topOrigins);
   // drawCasualtiesChart is driven by MOH daily fetch, not by stats refresh
