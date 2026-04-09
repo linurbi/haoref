@@ -140,70 +140,90 @@ function Strip-Html([string]$s) {
     [regex]::Replace($s, '<[^>]+>', ' ').Trim() -replace '\s+', ' '
 }
 
-# Gap thresholds per alert_type (seconds). Within-threshold → same incident.
-$INCIDENT_GAP = @{
-    rockets      = 90    # 90 sec — salvo window (קו העימות fires ~15s apart per city)
-    pre_alert    = 120   # 2 min  — rapid pre-alert bursts
-    ballistic    = 300   # 5 min  — wide-area ballistic warning
-    uav          = 120   # 2 min  — consecutive cities along a drone path
-    earthquake   = 600
-    infiltration = 300
-    hazmat       = 600
-    wildfire     = 600
-    tsunami      = 600
-}
-$INCIDENT_GAP_DEFAULT = 90
+# ── Incident clustering thresholds — region-aware ────────────────────────────
+#
+# tier 'north' = אזור קו העימות  (15-second shelter time)
+# tier 'other' = rest of Israel  (90-second shelter time)
+# UAV          = "go immediately" — no fixed shelter time, very tight windows
+#
+# gap     = max seconds between consecutive events to stay in the same incident
+# maxDur  = hard cap on total incident span — prevents chaining across long stretches
 
-# Maximum total duration of a single incident (seconds).
-# Forces a new incident even if consecutive messages are within the gap threshold.
-# Critical for קו העימות where ~15s inter-message gaps can chain alerts minutes apart.
-$INCIDENT_MAX_DURATION = @{
-    rockets      = 180   # 3 min  — a barrage shouldn't span more than 3 min
-    pre_alert    = 180
-    ballistic    = 300   # 5 min
-    uav          = 240   # 4 min  — a single drone pass through the confrontation line
-    earthquake   = 900
-    infiltration = 600
-    hazmat       = 900
-    wildfire     = 1800
-    tsunami      = 900
+$INCIDENT_GAP = @{
+    #              north   other
+    rockets      = @{ n=20;  o=90  }   # north: 15s shelter → ~20s between city msgs in same salvo
+    pre_alert    = @{ n=20;  o=120 }
+    ballistic    = @{ n=20;  o=300 }   # wide-area; north still gets 15s warning
+    uav          = @{ n=15;  o=60  }   # "go immediately" → very tight; drone passes city-by-city
+    earthquake   = @{ n=600; o=600 }
+    infiltration = @{ n=30;  o=300 }
+    hazmat       = @{ n=600; o=600 }
+    wildfire     = @{ n=600; o=600 }
+    tsunami      = @{ n=600; o=600 }
 }
-$INCIDENT_MAX_DURATION_DEFAULT = 180
+$INCIDENT_GAP_DEFAULT = @{ n=20; o=90 }
+
+$INCIDENT_MAX_DURATION = @{
+    #              north   other
+    rockets      = @{ n=45;  o=180 }   # north: 15s×cities → 3-4 cities = ~45s max; south 3 min
+    pre_alert    = @{ n=60;  o=180 }
+    ballistic    = @{ n=60;  o=300 }
+    uav          = @{ n=90;  o=240 }   # north drone pass: 90s max; south 4 min
+    earthquake   = @{ n=900; o=900 }
+    infiltration = @{ n=120; o=600 }
+    hazmat       = @{ n=900; o=900 }
+    wildfire     = @{ n=1800;o=1800}
+    tsunami      = @{ n=900; o=900 }
+}
+$INCIDENT_MAX_DURATION_DEFAULT = @{ n=45; o=180 }
 
 function Set-IncidentIds {
     Write-Host ""
-    Write-Host "=== Computing incident IDs ==="
+    Write-Host "=== Computing incident IDs (region-aware) ==="
 
-    # 1. Pull one row per msg_id: its earliest timestamp + alert_type
-    $res = Invoke-D1Query "SELECT msg_id, MIN(alert_ts) AS first_ts, alert_type FROM tg_alerts WHERE alert_type NOT IN ('all_clear','unknown') GROUP BY msg_id ORDER BY alert_type, first_ts"
+    # 1. Pull one row per msg_id: timestamp, type, and whether it touches קו העימות
+    $res = Invoke-D1Query @"
+SELECT msg_id, MIN(alert_ts) AS first_ts, alert_type,
+       MAX(CASE WHEN region = 'אזור קו העימות' THEN 1 ELSE 0 END) AS is_north
+FROM tg_alerts
+WHERE alert_type NOT IN ('all_clear','unknown')
+GROUP BY msg_id
+ORDER BY alert_type, first_ts
+"@
     $msgRows = @($res[0].results) | Sort-Object alert_type, first_ts
 
     Write-Host "  $($msgRows.Count) siren events to cluster..."
 
-    # 2. Assign incident IDs in PowerShell
-    $assignments  = @{}   # msg_id → incident_id string
-    $lastTs       = @{}   # alert_type → last [datetime]
-    $incStart     = @{}   # alert_type → first_ts string of current incident
-    $incStartDt   = @{}   # alert_type → [datetime] of current incident start
+    # 2. Assign incident IDs — state keyed by "$alert_type|$tier" so north/south track independently
+    $assignments  = @{}   # msg_id  → incident_id string
+    $lastTs       = @{}   # key     → last [datetime]
+    $incStart     = @{}   # key     → first_ts string of current incident
+    $incStartDt   = @{}   # key     → [datetime] of current incident start
 
     foreach ($row in $msgRows) {
-        $at     = $row.alert_type
-        $ts     = [datetime]$row.first_ts
-        $gap    = if ($INCIDENT_GAP.ContainsKey($at))          { $INCIDENT_GAP[$at] }          else { $INCIDENT_GAP_DEFAULT }
-        $maxDur = if ($INCIDENT_MAX_DURATION.ContainsKey($at)) { $INCIDENT_MAX_DURATION[$at] } else { $INCIDENT_MAX_DURATION_DEFAULT }
+        $at   = $row.alert_type
+        $ts   = [datetime]$row.first_ts
+        $tier = if ($row.is_north -eq 1) { 'n' } else { 'o' }
+        $key  = "$at|$tier"
+
+        $gapMap = if ($INCIDENT_GAP.ContainsKey($at))          { $INCIDENT_GAP[$at] }          else { $INCIDENT_GAP_DEFAULT }
+        $durMap = if ($INCIDENT_MAX_DURATION.ContainsKey($at)) { $INCIDENT_MAX_DURATION[$at] } else { $INCIDENT_MAX_DURATION_DEFAULT }
+        $gap    = $gapMap[$tier]
+        $maxDur = $durMap[$tier]
 
         $newIncident = (
-            -not $lastTs.ContainsKey($at) -or                                          # first ever
-            ($ts - $lastTs[$at]).TotalSeconds -gt $gap -or                             # gap exceeded
-            ($incStartDt.ContainsKey($at) -and ($ts - $incStartDt[$at]).TotalSeconds -gt $maxDur)  # duration cap
+            -not $lastTs.ContainsKey($key) -or
+            ($ts - $lastTs[$key]).TotalSeconds       -gt $gap -or
+            ($incStartDt.ContainsKey($key) -and ($ts - $incStartDt[$key]).TotalSeconds -gt $maxDur)
         )
 
         if ($newIncident) {
-            $incStart[$at]   = $row.first_ts
-            $incStartDt[$at] = $ts
+            $incStart[$key]   = $row.first_ts
+            $incStartDt[$key] = $ts
         }
-        $lastTs[$at] = $ts
-        $assignments[$row.msg_id] = "$at|$($incStart[$at])"
+        $lastTs[$key] = $ts
+        # Include tier in incident_id so north/south incidents with same timestamp never collide
+        $assignments[$row.msg_id] = "$at|$tier|$($incStart[$key])"
     }
 
     $uniqueIncidents = ($assignments.Values | Sort-Object -Unique).Count
