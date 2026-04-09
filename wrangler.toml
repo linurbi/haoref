@@ -1,0 +1,9 @@
+name       = "misty-pond-cb9d"
+main       = "cloudflare-worker.js"
+account_id = "913dd7d67a19b98eb74cab6d8e8e0b4a"
+compatibility_date = "2024-01-01"
+
+[[d1_databases]]
+binding      = "DB"
+database_name = "tg-alerts"
+database_id   = "ac645c9a-e7cc-4eb1-a0b1-17fe4cc437e5"

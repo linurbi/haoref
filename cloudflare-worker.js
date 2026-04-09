@@ -65,41 +65,36 @@ async function handleTgStats(url, env) {
     const realAf = " AND alert_type IN ('rockets','uav','ballistic','infiltration')";
 
     const [totRow, timelineRows, zoneRows, originRows, peakRow, cityRows, hourlyRows] = await Promise.all([
-      // Totals: real alerts only (pre_alert excluded — it's a warning, not an actual attack)
+      // Totals counted by incident (one launch = one incident, regardless of cities hit)
       env.DB.prepare(`SELECT
-          COUNT(DISTINCT msg_id)      AS range_events,
-          COUNT(DISTINCT incident_id) AS incidents,
+          COUNT(DISTINCT incident_id) AS range_events,
           COUNT(*)                    AS city_activations,
           COUNT(DISTINCT city)        AS unique_cities,
           COUNT(DISTINCT region)      AS unique_zones
         FROM tg_alerts ${where}${af}${loc}`).first(),
 
       env.DB.prepare(`SELECT DATE(alert_ts) AS period,
-          COUNT(DISTINCT msg_id)      AS count,
-          COUNT(DISTINCT incident_id) AS incidents
+          COUNT(DISTINCT incident_id) AS count
         FROM tg_alerts ${where}${af}${loc}
         GROUP BY DATE(alert_ts) ORDER BY period`).all(),
 
       env.DB.prepare(`SELECT region AS zone,
-          COUNT(DISTINCT msg_id)      AS count,
-          COUNT(DISTINCT incident_id) AS incidents
+          COUNT(DISTINCT incident_id) AS count
         FROM tg_alerts ${where}${af}${loc} AND region != ''
         GROUP BY region ORDER BY count DESC LIMIT 20`).all(),
 
-      // Origin breakdown: include pre_alert so users see its share
+      // Origin breakdown by incident count
       env.DB.prepare(`SELECT alert_type,
-          COUNT(DISTINCT msg_id)      AS count,
-          COUNT(DISTINCT incident_id) AS incidents
+          COUNT(DISTINCT incident_id) AS count
         FROM tg_alerts ${where}${afA}${loc}
         GROUP BY alert_type ORDER BY count DESC`).all(),
 
       env.DB.prepare(`SELECT SUBSTR(alert_ts,1,13)||':00:00Z' AS period,
-          COUNT(DISTINCT msg_id) AS count
+          COUNT(DISTINCT incident_id) AS count
         FROM tg_alerts ${where}${af}${loc}
         GROUP BY SUBSTR(alert_ts,1,13) ORDER BY count DESC LIMIT 1`).first(),
 
-      // Per (city, zone): rank by total incidents (attack clusters), then by unique days.
-      // This naturally floats קו העימות cities — hit by the most distinct barrages — to the top.
+      // Per (city, zone): rank by total incidents, then unique days
       env.DB.prepare(`SELECT city, region AS zone,
           COUNT(DISTINCT DATE(alert_ts))                                                       AS count,
           COUNT(DISTINCT incident_id)                                                          AS incidents,
@@ -111,7 +106,7 @@ async function handleTgStats(url, env) {
         GROUP BY city, region ORDER BY incidents DESC, count DESC LIMIT 15`).all(),
 
       env.DB.prepare(`SELECT CAST(strftime('%H', alert_ts) AS INTEGER) AS hour,
-          COUNT(DISTINCT msg_id) AS count
+          COUNT(DISTINCT incident_id) AS count
         FROM tg_alerts ${where}${af}${loc}
         GROUP BY hour ORDER BY hour`).all(),
     ]);
@@ -122,10 +117,10 @@ async function handleTgStats(url, env) {
       filterRegion: regionFilter || null,
       uniqueCities: totRow.unique_cities,
       uniqueZones:  totRow.unique_zones,
-      totals:       { range: totRow.range_events, incidents: totRow.incidents, cityActivations: totRow.city_activations },
+      totals:       { range: totRow.range_events, cityActivations: totRow.city_activations },
       timeline:     timelineRows.results,
       topZones:     zoneRows.results,
-      topOrigins:   originRows.results.map(r => ({ origin: r.alert_type, count: r.count, incidents: r.incidents })),
+      topOrigins:   originRows.results.map(r => ({ origin: r.alert_type, count: r.count })),
       topCities: cityRows.results,   // rockets+uav combined, per (city,zone)
       peak:      peakRow || {},
       hourly:    hourlyRows.results,
