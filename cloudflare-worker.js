@@ -47,48 +47,57 @@ async function handleTgStats(url, env) {
   const endDate   = url.searchParams.get("endDate")   || "";
 
   const where = buildWhere(startDate, endDate);
-  const af    = " AND alert_type NOT IN ('all_clear','unknown')";
+  const cityFilter   = url.searchParams.get("city")   || "";
+  const regionFilter = url.searchParams.get("region") || "";
+
+  const cf  = cityFilter   ? ` AND city   = '${cityFilter.replace(/'/g,"''")}'`   : "";
+  const rf  = regionFilter ? ` AND region = '${regionFilter.replace(/'/g,"''")}'` : "";
+  const loc = cf + rf;   // combined location filter
+
+  // af  = real operational alerts (excludes pre_alert/all_clear/unknown) — used for totals & charts
+  // afA = all user-visible types (includes pre_alert) — used only for origin-type breakdown card
+  const af  = " AND alert_type NOT IN ('all_clear','unknown','pre_alert')";
+  const afA = " AND alert_type NOT IN ('all_clear','unknown')";
 
   try {
-    // Real-alert filter: rockets + UAV + ballistic + infiltration (excludes pre_alert noise)
+    // Strict real-alert filter for city ranking (rockets/UAV/ballistic/infiltration only)
     const realAf = " AND alert_type IN ('rockets','uav','ballistic','infiltration')";
 
     const [totRow, timelineRows, zoneRows, originRows, peakRow, cityRows, hourlyRows] = await Promise.all([
+      // Totals: real alerts only (pre_alert excluded — it's a warning, not an actual attack)
       env.DB.prepare(`SELECT
           COUNT(DISTINCT msg_id)      AS range_events,
           COUNT(DISTINCT incident_id) AS incidents,
           COUNT(*)                    AS city_activations,
           COUNT(DISTINCT city)        AS unique_cities,
           COUNT(DISTINCT region)      AS unique_zones
-        FROM tg_alerts ${where}${af}`).first(),
+        FROM tg_alerts ${where}${af}${loc}`).first(),
 
       env.DB.prepare(`SELECT DATE(alert_ts) AS period,
           COUNT(DISTINCT msg_id)      AS count,
           COUNT(DISTINCT incident_id) AS incidents
-        FROM tg_alerts ${where}${af}
+        FROM tg_alerts ${where}${af}${loc}
         GROUP BY DATE(alert_ts) ORDER BY period`).all(),
 
       env.DB.prepare(`SELECT region AS zone,
           COUNT(DISTINCT msg_id)      AS count,
           COUNT(DISTINCT incident_id) AS incidents
-        FROM tg_alerts ${where}${af} AND region != ''
+        FROM tg_alerts ${where}${af}${loc} AND region != ''
         GROUP BY region ORDER BY count DESC LIMIT 20`).all(),
 
+      // Origin breakdown: include pre_alert so users see its share
       env.DB.prepare(`SELECT alert_type,
           COUNT(DISTINCT msg_id)      AS count,
           COUNT(DISTINCT incident_id) AS incidents
-        FROM tg_alerts ${where}${af}
+        FROM tg_alerts ${where}${afA}${loc}
         GROUP BY alert_type ORDER BY count DESC`).all(),
 
       env.DB.prepare(`SELECT SUBSTR(alert_ts,1,13)||':00:00Z' AS period,
           COUNT(DISTINCT msg_id) AS count
-        FROM tg_alerts ${where}${af}
+        FROM tg_alerts ${where}${af}${loc}
         GROUP BY SUBSTR(alert_ts,1,13) ORDER BY count DESC LIMIT 1`).first(),
 
       // Per (city, zone): rank by UNIQUE DAYS under attack (sustained threat).
-      // Raw incident count is skewed by opening-day barrages (e.g. 21 waves on Dan area day-1).
-      // "Unique days attacked" correctly elevates northern border cities that were hit every day.
-      // Secondary sort by incidents so ties break on total volume.
       env.DB.prepare(`SELECT city, region AS zone,
           COUNT(DISTINCT DATE(alert_ts))                                                       AS count,
           COUNT(DISTINCT incident_id)                                                          AS incidents,
@@ -96,17 +105,19 @@ async function handleTgStats(url, env) {
           COUNT(DISTINCT CASE WHEN alert_type='uav'          THEN incident_id END)             AS uav,
           COUNT(DISTINCT CASE WHEN alert_type='ballistic'    THEN incident_id END)             AS ballistic,
           COUNT(DISTINCT CASE WHEN alert_type='infiltration' THEN incident_id END)             AS infiltration
-        FROM tg_alerts ${where}${realAf} AND city != ''
+        FROM tg_alerts ${where}${realAf}${loc} AND city != ''
         GROUP BY city, region ORDER BY count DESC, incidents DESC LIMIT 20`).all(),
 
       env.DB.prepare(`SELECT CAST(strftime('%H', alert_ts) AS INTEGER) AS hour,
           COUNT(DISTINCT msg_id) AS count
-        FROM tg_alerts ${where}${af}
+        FROM tg_alerts ${where}${af}${loc}
         GROUP BY hour ORDER BY hour`).all(),
     ]);
 
     const result = {
       source:       "d1-telegram",
+      filterCity:   cityFilter   || null,
+      filterRegion: regionFilter || null,
       uniqueCities: totRow.unique_cities,
       uniqueZones:  totRow.unique_zones,
       totals:       { range: totRow.range_events, incidents: totRow.incidents, cityActivations: totRow.city_activations },

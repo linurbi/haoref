@@ -127,6 +127,17 @@
     <label>מקור:</label>
     <button class="filter-btn src-btn active" data-src="d1">📊 טלגרם</button>
     <button class="filter-btn src-btn" data-src="redalert">📡 RedAlert</button>
+    <div class="filter-sep"></div>
+    <label>אזור:</label>
+    <select id="filterRegion" class="filter-select">
+      <option value="">כל האזורים</option>
+    </select>
+    <label>יישוב:</label>
+    <div class="filter-city-wrap">
+      <input id="filterCity" class="filter-input" type="text" placeholder="שם יישוב..." autocomplete="off" />
+      <button class="filter-apply" id="applyCityFilter">החל</button>
+      <button class="filter-clear" id="clearCityFilter" title="נקה סינון">✕</button>
+    </div>
   </div>
 
   <!-- Compact KPI grid — 5 per row, 2 rows -->
@@ -330,11 +341,17 @@ function drawCasualties(cas) {
 // ── Active data source mode: "d1" | "redalert" | "auto" ─────────────────────
 let dataMode = "d1";
 
+// ── Location filter state ─────────────────────────────────────────────────────
+let filterCity   = "";
+let filterRegion = "";
+
 // ── Fetch stats — respects dataMode ──────────────────────────────────────────
 async function fetchStats(startDate, endDate) {
   const params = new URLSearchParams();
-  if (startDate) params.set("startDate", startDate);
-  if (endDate)   params.set("endDate",   endDate);
+  if (startDate)    params.set("startDate", startDate);
+  if (endDate)      params.set("endDate",   endDate);
+  if (filterCity)   params.set("city",      filterCity);
+  if (filterRegion) params.set("region",    filterRegion);
   const qs = [...params].length ? "?" + params.toString() : "";
 
   // "redalert" → only RedAlert; "d1" → only D1 (no silent fallback, retry handles cold starts)
@@ -994,8 +1011,26 @@ function drawInterceptions(byDay) {
 // ═══════════════════════════════════════════════
 // MAIN REFRESH
 // ═══════════════════════════════════════════════
+function populateRegionDropdown(topZones) {
+  const sel = document.getElementById("filterRegion");
+  if (!sel || !topZones || topZones.length === 0) return;
+  const current = sel.value;
+  // Keep first "all" option, rebuild the rest
+  sel.innerHTML = '<option value="">כל האזורים</option>';
+  topZones.forEach(z => {
+    const zone = z.zone || z.region || "";
+    if (!zone) return;
+    const opt = document.createElement("option");
+    opt.value = zone;
+    opt.textContent = zone.replace(/^אזור\s+/, "");
+    if (zone === current) opt.selected = true;
+    sel.appendChild(opt);
+  });
+}
+
 function renderStats(stats) {
   updateKPIs(stats);
+  if (stats.isD1 && stats.topZones) populateRegionDropdown(stats.topZones);
   drawOriginCards(stats.topOrigins);
   drawDaily(stats.byDay);
   if (stats.isD1 && stats.hourly.some(v => v > 0)) {
@@ -1176,6 +1211,32 @@ window.addEventListener("load", async () => {
     const toVal   = document.getElementById("filterTo").value;
     currentStartDate = fromVal ? fromVal + "T00:00:00Z" : OP_START;
     currentEndDate   = toVal   ? toVal   + "T23:59:59Z" : "";
+    refresh();
+  });
+
+  // ── Region dropdown ──
+  document.getElementById("filterRegion").addEventListener("change", function() {
+    filterRegion = this.value;
+    filterCity   = "";
+    document.getElementById("filterCity").value = "";
+    refresh();
+  });
+
+  // ── City filter ──
+  document.getElementById("applyCityFilter").addEventListener("click", () => {
+    filterCity   = document.getElementById("filterCity").value.trim();
+    filterRegion = "";
+    document.getElementById("filterRegion").value = "";
+    refresh();
+  });
+  document.getElementById("filterCity").addEventListener("keydown", e => {
+    if (e.key === "Enter") document.getElementById("applyCityFilter").click();
+  });
+  document.getElementById("clearCityFilter").addEventListener("click", () => {
+    filterCity   = "";
+    filterRegion = "";
+    document.getElementById("filterCity").value  = "";
+    document.getElementById("filterRegion").value = "";
     refresh();
   });
 

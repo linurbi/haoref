@@ -195,6 +195,28 @@ main { padding:28px 40px; max-width:1640px; margin:0 auto; }
 }
 .filter-apply:hover { opacity:0.8; }
 
+.filter-select {
+  background:var(--card); border:1px solid var(--border); color:var(--text);
+  border-radius:100px; padding:4px 12px; font-family:'Heebo',sans-serif; font-size:12px;
+  cursor:pointer; outline:none; max-width:160px;
+}
+.filter-select:focus { border-color:var(--c1); }
+
+.filter-city-wrap { display:flex; align-items:center; gap:4px; }
+.filter-input {
+  background:var(--card); border:1px solid var(--border); color:var(--text);
+  border-radius:100px; padding:4px 12px; font-family:'Heebo',sans-serif; font-size:12px;
+  outline:none; width:130px; direction:rtl;
+}
+.filter-input:focus  { border-color:var(--c1); }
+.filter-input::placeholder { color:var(--text-faint); }
+.filter-clear {
+  background:transparent; border:1px solid var(--border); color:var(--text-faint);
+  border-radius:50%; width:24px; height:24px; font-size:11px; cursor:pointer;
+  display:flex; align-items:center; justify-content:center; padding:0; transition:all 0.2s;
+}
+.filter-clear:hover { border-color:var(--c1); color:var(--c1); }
+
 /* ══════════════════════════════════════════════════════════════
    KPI BLOCK  — 5-per-row grid, gradient-tinted cells, white nums
 ══════════════════════════════════════════════════════════════ */
