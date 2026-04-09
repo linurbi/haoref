@@ -1,0 +1,25 @@
+name: Scrape Pikud HaOref Delta
+
+on:
+  schedule:
+    # Every 20 minutes, around the clock
+    - cron: '*/20 * * * *'
+  workflow_dispatch:   # Allow manual trigger from GitHub UI
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run delta scraper
+        shell: pwsh
+        env:
+          CF_ACCOUNT_ID:  ${{ secrets.CF_ACCOUNT_ID }}
+          CF_API_TOKEN:   ${{ secrets.CF_API_TOKEN }}
+          D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+        run: |
+          pwsh -ExecutionPolicy Bypass -File ./parse_telegram_d1.ps1
