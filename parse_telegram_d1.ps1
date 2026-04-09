@@ -142,17 +142,33 @@ function Strip-Html([string]$s) {
 
 # Gap thresholds per alert_type (seconds). Within-threshold → same incident.
 $INCIDENT_GAP = @{
-    rockets      = 180   # 3 min  — salvo window
+    rockets      = 90    # 90 sec — salvo window (קו העימות fires ~15s apart per city)
     pre_alert    = 120   # 2 min  — rapid pre-alert bursts
     ballistic    = 300   # 5 min  — wide-area ballistic warning
-    uav          = 600   # 10 min — drones move slowly
+    uav          = 120   # 2 min  — consecutive cities along a drone path
     earthquake   = 600
-    infiltration = 600
+    infiltration = 300
     hazmat       = 600
     wildfire     = 600
     tsunami      = 600
 }
-$INCIDENT_GAP_DEFAULT = 180
+$INCIDENT_GAP_DEFAULT = 90
+
+# Maximum total duration of a single incident (seconds).
+# Forces a new incident even if consecutive messages are within the gap threshold.
+# Critical for קו העימות where ~15s inter-message gaps can chain alerts minutes apart.
+$INCIDENT_MAX_DURATION = @{
+    rockets      = 180   # 3 min  — a barrage shouldn't span more than 3 min
+    pre_alert    = 180
+    ballistic    = 300   # 5 min
+    uav          = 240   # 4 min  — a single drone pass through the confrontation line
+    earthquake   = 900
+    infiltration = 600
+    hazmat       = 900
+    wildfire     = 1800
+    tsunami      = 900
+}
+$INCIDENT_MAX_DURATION_DEFAULT = 180
 
 function Set-IncidentIds {
     Write-Host ""
@@ -165,17 +181,26 @@ function Set-IncidentIds {
     Write-Host "  $($msgRows.Count) siren events to cluster..."
 
     # 2. Assign incident IDs in PowerShell
-    $assignments = @{}   # msg_id → incident_id string
-    $lastTs      = @{}   # alert_type → last [datetime]
-    $incStart    = @{}   # alert_type → first_ts of current incident (string)
+    $assignments  = @{}   # msg_id → incident_id string
+    $lastTs       = @{}   # alert_type → last [datetime]
+    $incStart     = @{}   # alert_type → first_ts string of current incident
+    $incStartDt   = @{}   # alert_type → [datetime] of current incident start
 
     foreach ($row in $msgRows) {
-        $at  = $row.alert_type
-        $ts  = [datetime]$row.first_ts
-        $gap = if ($INCIDENT_GAP.ContainsKey($at)) { $INCIDENT_GAP[$at] } else { $INCIDENT_GAP_DEFAULT }
+        $at     = $row.alert_type
+        $ts     = [datetime]$row.first_ts
+        $gap    = if ($INCIDENT_GAP.ContainsKey($at))          { $INCIDENT_GAP[$at] }          else { $INCIDENT_GAP_DEFAULT }
+        $maxDur = if ($INCIDENT_MAX_DURATION.ContainsKey($at)) { $INCIDENT_MAX_DURATION[$at] } else { $INCIDENT_MAX_DURATION_DEFAULT }
 
-        if (-not $lastTs.ContainsKey($at) -or ($ts - $lastTs[$at]).TotalSeconds -gt $gap) {
-            $incStart[$at] = $row.first_ts   # new incident starts here
+        $newIncident = (
+            -not $lastTs.ContainsKey($at) -or                                          # first ever
+            ($ts - $lastTs[$at]).TotalSeconds -gt $gap -or                             # gap exceeded
+            ($incStartDt.ContainsKey($at) -and ($ts - $incStartDt[$at]).TotalSeconds -gt $maxDur)  # duration cap
+        )
+
+        if ($newIncident) {
+            $incStart[$at]   = $row.first_ts
+            $incStartDt[$at] = $ts
         }
         $lastTs[$at] = $ts
         $assignments[$row.msg_id] = "$at|$($incStart[$at])"
