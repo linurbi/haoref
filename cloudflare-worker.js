@@ -31,6 +31,7 @@ export default {
     if (pathname.endsWith("/daily-casualties")) return handleMohEndpoint(MOH_DAILY_CASUALTIES, 1800);
     if (pathname.endsWith("/tg-stats"))         return handleTgStats(url, env);
     if (pathname.endsWith("/incidents"))        return handleIncidents(url, env);
+    if (pathname.endsWith("/cities"))           return handleCities(url, env);
 
     // Default: proxy RedAlert
     return handleRedAlert(url, env);
@@ -97,7 +98,8 @@ async function handleTgStats(url, env) {
         FROM tg_alerts ${where}${af}${loc}
         GROUP BY SUBSTR(alert_ts,1,13) ORDER BY count DESC LIMIT 1`).first(),
 
-      // Per (city, zone): rank by UNIQUE DAYS under attack (sustained threat).
+      // Per (city, zone): rank by total incidents (attack clusters), then by unique days.
+      // This naturally floats קו העימות cities — hit by the most distinct barrages — to the top.
       env.DB.prepare(`SELECT city, region AS zone,
           COUNT(DISTINCT DATE(alert_ts))                                                       AS count,
           COUNT(DISTINCT incident_id)                                                          AS incidents,
@@ -106,7 +108,7 @@ async function handleTgStats(url, env) {
           COUNT(DISTINCT CASE WHEN alert_type='ballistic'    THEN incident_id END)             AS ballistic,
           COUNT(DISTINCT CASE WHEN alert_type='infiltration' THEN incident_id END)             AS infiltration
         FROM tg_alerts ${where}${realAf}${loc} AND city != ''
-        GROUP BY city, region ORDER BY count DESC, incidents DESC LIMIT 20`).all(),
+        GROUP BY city, region ORDER BY incidents DESC, count DESC LIMIT 15`).all(),
 
       env.DB.prepare(`SELECT CAST(strftime('%H', alert_ts) AS INTEGER) AS hour,
           COUNT(DISTINCT msg_id) AS count
@@ -130,6 +132,23 @@ async function handleTgStats(url, env) {
     };
 
     return json(result, 200, "max-age=120, s-maxage=120");
+  } catch (e) {
+    return json({ error: e.message }, 503);
+  }
+}
+
+// ── /cities — all distinct (city, region) combos for autocomplete ─────────────
+async function handleCities(url, env) {
+  if (!env.DB) return json({ error: "D1 binding 'DB' not configured" }, 503);
+  const where = buildWhere(OP_START, "");
+  try {
+    const rows = await env.DB.prepare(
+      `SELECT DISTINCT city, region FROM tg_alerts ${where}
+         AND city != ''
+         AND alert_type IN ('rockets','uav','ballistic','infiltration')
+       ORDER BY city`
+    ).all();
+    return json({ cities: rows.results }, 200, "max-age=3600, s-maxage=3600");
   } catch (e) {
     return json({ error: e.message }, 503);
   }

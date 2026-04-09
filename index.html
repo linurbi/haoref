@@ -134,7 +134,8 @@
     </select>
     <label>יישוב:</label>
     <div class="filter-city-wrap">
-      <input id="filterCity" class="filter-input" type="text" placeholder="שם יישוב..." autocomplete="off" />
+      <input id="filterCity" class="filter-input" type="text" placeholder="בחר יישוב..." list="cityDatalist" />
+      <datalist id="cityDatalist"></datalist>
       <button class="filter-apply" id="applyCityFilter">החל</button>
       <button class="filter-clear" id="clearCityFilter" title="נקה סינון">✕</button>
     </div>
@@ -196,7 +197,7 @@
   <!-- Row 2: Top cities (rockets + UAV combined) + Region distribution -->
   <div class="charts-grid">
     <div class="chart-card" style="grid-column: span 2">
-      <div class="card-title"><div class="dot" aria-hidden="true"></div>יישובים מותקפים ביותר — לפי ימי תקיפה <span class="card-unit">Top 20 · מיון לפי ימים ייחודיים</span></div>
+      <div class="card-title"><div class="dot" aria-hidden="true"></div>יישובים מותקפים ביותר <span class="card-unit">Top 15 · מיון לפי אירועים</span></div>
       <div class="chart-wrap tall wide"><canvas id="chartAreas" aria-label="גרף יישובים מותקפים ביותר"></canvas></div>
     </div>
     <canvas id="chartRegions" style="display:none"></canvas>
@@ -344,6 +345,28 @@ let dataMode = "d1";
 // ── Location filter state ─────────────────────────────────────────────────────
 let filterCity   = "";
 let filterRegion = "";
+
+// ── City autocomplete list ────────────────────────────────────────────────────
+let _allCities = [];   // [{city, region}] fetched once from /cities
+
+async function fetchCityList() {
+  try {
+    const resp = await fetch(CF_WORKER_URL + "/cities");
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    const data = await resp.json();
+    _allCities = data.cities || [];
+    populateCityDatalist(filterRegion);
+  } catch (e) {
+    console.warn("City list fetch failed:", e.message);
+  }
+}
+
+function populateCityDatalist(region) {
+  const dl = document.getElementById("cityDatalist");
+  if (!dl) return;
+  const items = region ? _allCities.filter(c => c.region === region) : _allCities;
+  dl.innerHTML = items.map(c => `<option value="${c.city}"></option>`).join("");
+}
 
 // ── Fetch stats — respects dataMode ──────────────────────────────────────────
 async function fetchStats(startDate, endDate) {
@@ -1219,14 +1242,26 @@ window.addEventListener("load", async () => {
     filterRegion = this.value;
     filterCity   = "";
     document.getElementById("filterCity").value = "";
+    populateCityDatalist(filterRegion);   // narrow city suggestions to this region
     refresh();
   });
 
-  // ── City filter ──
+  // ── City filter — auto-apply when user picks from datalist (exact match) ──
+  document.getElementById("filterCity").addEventListener("input", function() {
+    const val = this.value.trim();
+    if (val && _allCities.some(c => c.city === val)) {
+      filterCity   = val;
+      filterRegion = "";
+      document.getElementById("filterRegion").value = "";
+      populateCityDatalist("");
+      refresh();
+    }
+  });
   document.getElementById("applyCityFilter").addEventListener("click", () => {
     filterCity   = document.getElementById("filterCity").value.trim();
     filterRegion = "";
     document.getElementById("filterRegion").value = "";
+    populateCityDatalist("");
     refresh();
   });
   document.getElementById("filterCity").addEventListener("keydown", e => {
@@ -1235,8 +1270,9 @@ window.addEventListener("load", async () => {
   document.getElementById("clearCityFilter").addEventListener("click", () => {
     filterCity   = "";
     filterRegion = "";
-    document.getElementById("filterCity").value  = "";
+    document.getElementById("filterCity").value   = "";
     document.getElementById("filterRegion").value = "";
+    populateCityDatalist("");
     refresh();
   });
 
@@ -1245,6 +1281,9 @@ window.addEventListener("load", async () => {
 
   // Short pause to let the progress bar animation start
   await new Promise(resolve => setTimeout(resolve, 600));
+
+  // Fetch city list for autocomplete (runs in background, non-blocking)
+  fetchCityList();
 
   // Fetch MOH data in parallel — severity totals + daily time-series
   fetchCasualties().then(raw => {
