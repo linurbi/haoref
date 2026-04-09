@@ -1,10 +1,9 @@
-# recompute_incidents.ps1
-# Recomputes incident_id for ALL rows in tg_alerts using region-aware thresholds.
-# Safe to run any time — only writes new incident_id values, does not insert/delete rows.
+﻿# recompute_incidents.ps1
+# Rewrites incident_id for ALL rows using region-aware thresholds.
+# No Hebrew literals in source — constructed via Unicode code points to avoid encoding issues.
 #
-# tier 'n' = אזור קו העימות  (15-second shelter time)
-# tier 'o' = rest of Israel  (90-second shelter time)
-# UAV       = "go immediately" — no fixed time, tightest window
+# tier n = confrontation-line north (15s shelter / UAV go-immediately)
+# tier o = rest of Israel (90s shelter)
 
 $CF_ACCOUNT_ID  = if ($env:CF_ACCOUNT_ID)  { $env:CF_ACCOUNT_ID }  else { "913dd7d67a19b98eb74cab6d8e8e0b4a" }
 $CF_API_TOKEN   = if ($env:CF_API_TOKEN)   { $env:CF_API_TOKEN }   else { "cfat_vec9LvsRcJtkxrx5p15DkZbWiMdW53U9jp2bj9b8e52ce9e2" }
@@ -14,114 +13,117 @@ $CF_HEADERS = @{ Authorization = "Bearer $CF_API_TOKEN"; "Content-Type" = "appli
 
 function Invoke-D1Query([string]$sql) {
     $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes((@{ sql = $sql } | ConvertTo-Json -Depth 3))
-    $resp = Invoke-RestMethod -Uri "$D1_URL/query" -Method Post `
-        -Headers $CF_HEADERS -Body $bodyBytes -ContentType "application/json; charset=utf-8"
-    if (-not $resp.success) { throw "D1 error: $($resp.errors | ConvertTo-Json)" }
+    $resp = Invoke-RestMethod -Uri "$D1_URL/query" -Method Post -Headers $CF_HEADERS -Body $bodyBytes -ContentType "application/json; charset=utf-8"
+    if (-not $resp.success) { throw ("D1 error: " + ($resp.errors | ConvertTo-Json)) }
     return $resp.result
 }
 
-# ── Thresholds ────────────────────────────────────────────────────────────────
-$INCIDENT_GAP = @{
-    rockets      = @{ n=20;  o=90  }
-    pre_alert    = @{ n=20;  o=120 }
-    ballistic    = @{ n=20;  o=300 }
-    uav          = @{ n=15;  o=60  }
+# "kav ha-imut" = region string for the confrontation line, built from Unicode codepoints
+$KAV = -join [char[]](0x05E7,0x05D5,0x20,0x05D4,0x05E2,0x05D9,0x05DE,0x05D5,0x05EA)
+
+# Thresholds: n = north (15s), o = other (90s)
+$GAP = @{
+    rockets      = @{ n=15;  o=90  }
+    pre_alert    = @{ n=15;  o=120 }
+    ballistic    = @{ n=15;  o=90  }
+    uav          = @{ n=5;   o=60  }
     earthquake   = @{ n=600; o=600 }
-    infiltration = @{ n=30;  o=300 }
+    infiltration = @{ n=15;  o=300 }
     hazmat       = @{ n=600; o=600 }
     wildfire     = @{ n=600; o=600 }
     tsunami      = @{ n=600; o=600 }
 }
-$INCIDENT_GAP_DEFAULT = @{ n=20; o=90 }
+$GAP_DEFAULT = @{ n=15; o=90 }
 
-$INCIDENT_MAX_DURATION = @{
-    rockets      = @{ n=45;  o=180 }
-    pre_alert    = @{ n=60;  o=180 }
-    ballistic    = @{ n=60;  o=300 }
-    uav          = @{ n=90;  o=240 }
+$MAX = @{
+    rockets      = @{ n=25;  o=180 }
+    pre_alert    = @{ n=25;  o=180 }
+    ballistic    = @{ n=25;  o=300 }
+    uav          = @{ n=10;  o=240 }
     earthquake   = @{ n=900; o=900 }
-    infiltration = @{ n=120; o=600 }
+    infiltration = @{ n=30;  o=600 }
     hazmat       = @{ n=900; o=900 }
     wildfire     = @{ n=1800;o=1800}
     tsunami      = @{ n=900; o=900 }
 }
-$INCIDENT_MAX_DURATION_DEFAULT = @{ n=45; o=180 }
+$MAX_DEFAULT = @{ n=25; o=180 }
 
-# ── Fetch all msg_id rows with north flag ─────────────────────────────────────
-Write-Host "Fetching all siren events from D1..."
-$sql = @"
-SELECT msg_id, MIN(alert_ts) AS first_ts, alert_type,
-       MAX(CASE WHEN region = 'אזור קו העימות' THEN 1 ELSE 0 END) AS is_north
-FROM tg_alerts
-WHERE alert_type NOT IN ('all_clear','unknown')
-GROUP BY msg_id
-ORDER BY alert_type, first_ts
-"@
-$res     = Invoke-D1Query $sql
-$msgRows = @($res[0].results) | Sort-Object alert_type, first_ts
-Write-Host "  $($msgRows.Count) siren events to re-cluster..."
+# Step 1a: find north msg_ids via a simple LIKE query
+$likePattern = "%" + $KAV + "%"
+$northSql = "SELECT DISTINCT msg_id FROM tg_alerts WHERE region LIKE '" + $likePattern + "'"
+$northRes = Invoke-D1Query $northSql
+$northSet = [System.Collections.Generic.HashSet[long]]::new()
+@($northRes[0].results) | ForEach-Object { [void]$northSet.Add([long]$_.msg_id) }
+Write-Host ("North msg_ids: " + $northSet.Count)
 
-# ── Cluster ───────────────────────────────────────────────────────────────────
-$assignments = @{}
-$lastTs      = @{}
-$incStart    = @{}
-$incStartDt  = @{}
+# Step 1b: fetch all siren events
+$allRes  = Invoke-D1Query "SELECT msg_id, MIN(alert_ts) AS first_ts, alert_type FROM tg_alerts WHERE alert_type NOT IN ('all_clear','unknown') GROUP BY msg_id ORDER BY alert_type, first_ts"
+$rows    = @($allRes[0].results) | Sort-Object alert_type, first_ts
+Write-Host ("Events to cluster: " + $rows.Count)
 
-foreach ($row in $msgRows) {
+# Step 2: cluster
+$asgn    = @{}
+$lastTs  = @{}
+$incSt   = @{}
+$incStDt = @{}
+
+foreach ($row in $rows) {
     $at   = $row.alert_type
     $ts   = [datetime]$row.first_ts
-    $tier = if ($row.is_north -eq 1) { 'n' } else { 'o' }
-    $key  = "$at|$tier"
+    $tier = if ($northSet.Contains([long]$row.msg_id)) { "n" } else { "o" }
+    $key  = $at + "|" + $tier
 
-    $gapMap = if ($INCIDENT_GAP.ContainsKey($at))          { $INCIDENT_GAP[$at] }          else { $INCIDENT_GAP_DEFAULT }
-    $durMap = if ($INCIDENT_MAX_DURATION.ContainsKey($at)) { $INCIDENT_MAX_DURATION[$at] } else { $INCIDENT_MAX_DURATION_DEFAULT }
-    $gap    = $gapMap[$tier]
-    $maxDur = $durMap[$tier]
+    $g = if ($GAP.ContainsKey($at)) { $GAP[$at][$tier] } else { $GAP_DEFAULT[$tier] }
+    $m = if ($MAX.ContainsKey($at)) { $MAX[$at][$tier] } else { $MAX_DEFAULT[$tier] }
 
-    $newIncident = (
+    $newInc = (
         -not $lastTs.ContainsKey($key) -or
-        ($ts - $lastTs[$key]).TotalSeconds       -gt $gap -or
-        ($incStartDt.ContainsKey($key) -and ($ts - $incStartDt[$key]).TotalSeconds -gt $maxDur)
+        ($ts - $lastTs[$key]).TotalSeconds -gt $g -or
+        ($incStDt.ContainsKey($key) -and ($ts - $incStDt[$key]).TotalSeconds -gt $m)
     )
 
-    if ($newIncident) {
-        $incStart[$key]   = $row.first_ts
-        $incStartDt[$key] = $ts
-    }
+    if ($newInc) { $incSt[$key] = $row.first_ts; $incStDt[$key] = $ts }
     $lastTs[$key] = $ts
-    $assignments[$row.msg_id] = "$at|$tier|$($incStart[$key])"
+    $asgn[$row.msg_id] = $at + "|" + $tier + "|" + $incSt[$key]
 }
 
-$uniqueIncidents = ($assignments.Values | Sort-Object -Unique).Count
-Write-Host "  → $uniqueIncidents unique incidents"
+$unique = ($asgn.Values | Sort-Object -Unique).Count
+Write-Host ("Unique incidents: " + $unique)
 
-# ── Batch UPDATE ──────────────────────────────────────────────────────────────
-$allMsgIds = @($assignments.Keys)
-[int]$total = $allMsgIds.Count
+# Step 3: batch UPDATE
+$allIds = @($asgn.Keys)
+[int]$total = $allIds.Count
 [int]$chunk = 200
-[int]$i     = 0
-[int]$done  = 0
+[int]$i = 0
+[int]$done = 0
 
-Write-Host "Writing incident IDs to D1 ($total msg_ids in batches of $chunk)..."
+Write-Host ("Writing to D1 (" + $total + " rows in batches of " + $chunk + ")...")
 while ($i -lt $total) {
     [int]$end  = [Math]::Min($i + $chunk - 1, $total - 1)
-    $slice  = $allMsgIds[$i..$end]
-    $cases  = ($slice | ForEach-Object { "WHEN $_ THEN '$(($assignments[$_] -replace "'","''"))'" }) -join " "
+    $slice = $allIds[$i..$end]
+    $cases = ($slice | ForEach-Object {
+        $safeId = $asgn[$_] -replace "'", "''"
+        "WHEN " + $_ + " THEN '" + $safeId + "'"
+    }) -join " "
     $inList = $slice -join ","
-    $sql    = "UPDATE tg_alerts SET incident_id = CASE msg_id $cases ELSE incident_id END WHERE msg_id IN ($inList)"
+    $sql = "UPDATE tg_alerts SET incident_id = CASE msg_id " + $cases + " ELSE incident_id END WHERE msg_id IN (" + $inList + ")"
     try   { Invoke-D1Query $sql | Out-Null }
-    catch { Write-Warning "  Update failed at batch $i`: $_" }
+    catch { Write-Warning ("Batch " + $i + " failed: " + $_) }
     $done += $slice.Count
-    if ($done % 1000 -eq 0 -or $done -eq $total) { Write-Host "  ...processed $done / $total" }
+    if ($done % 1000 -eq 0 -or $done -eq $total) { Write-Host ("  " + $done + " / " + $total) }
     $i += $chunk
     Start-Sleep -Milliseconds 120
 }
 
-Write-Host ""
-Write-Host "Done. Incident IDs recomputed."
-Write-Host ""
+Write-Host "Done."
 
-# ── Summary ───────────────────────────────────────────────────────────────────
-$summary = (Invoke-D1Query "SELECT alert_type, COUNT(DISTINCT incident_id) AS incidents, COUNT(DISTINCT msg_id) AS events FROM tg_alerts WHERE alert_type NOT IN ('all_clear','unknown') GROUP BY alert_type ORDER BY incidents DESC")[0].results
-Write-Host "Incidents per type (region-aware clustering):"
-$summary | ForEach-Object { Write-Host ("  {0,-14} {1,5} incidents  ({2} events)" -f $_.alert_type, $_.incidents, $_.events) }
+# Summary
+$sum = (Invoke-D1Query "SELECT alert_type, COUNT(DISTINCT incident_id) AS inc, COUNT(DISTINCT msg_id) AS ev FROM tg_alerts WHERE alert_type NOT IN ('all_clear','unknown') GROUP BY alert_type ORDER BY inc DESC")[0].results
+Write-Host "Result:"
+$sum | ForEach-Object { Write-Host ("  " + $_.alert_type + ": " + $_.inc + " incidents (" + $_.ev + " events)") }
+
+# Spot-check: last 5 north rocket msg_ids -- each should have a different incident_id
+$spotSql = "SELECT msg_id, alert_ts, incident_id FROM tg_alerts WHERE region LIKE '" + $likePattern + "' AND alert_type='rockets' GROUP BY msg_id ORDER BY alert_ts DESC LIMIT 5"
+$spot = (Invoke-D1Query $spotSql)[0].results
+Write-Host "Spot-check last 5 north rocket msgs:"
+$spot | ForEach-Object { Write-Host ("  msg=" + $_.msg_id + "  ts=" + $_.alert_ts + "  inc=" + $_.incident_id) }

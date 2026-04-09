@@ -1,4 +1,4 @@
-# parse_telegram_d1.ps1
+﻿# parse_telegram_d1.ps1
 # Scrapes https://t.me/s/PikudHaOref_all (public web view, no credentials needed)
 # Parses every alert message and bulk-inserts into Cloudflare D1.
 #
@@ -140,123 +140,108 @@ function Strip-Html([string]$s) {
     [regex]::Replace($s, '<[^>]+>', ' ').Trim() -replace '\s+', ' '
 }
 
-# ── Incident clustering thresholds — region-aware ────────────────────────────
-#
-# tier 'north' = אזור קו העימות  (15-second shelter time)
-# tier 'other' = rest of Israel  (90-second shelter time)
-# UAV          = "go immediately" — no fixed shelter time, very tight windows
-#
-# gap     = max seconds between consecutive events to stay in the same incident
-# maxDur  = hard cap on total incident span — prevents chaining across long stretches
+# Incident clustering: region-aware (north=15s shelter, other=90s, UAV=go-immediately)
+# Hebrew built from code points to avoid PS1 encoding issues
+$KAV_IMUT = -join [char[]](0x05E7,0x05D5,0x20,0x05D4,0x05E2,0x05D9,0x05DE,0x05D5,0x05EA)
 
 $INCIDENT_GAP = @{
-    #              north   other
-    rockets      = @{ n=20;  o=90  }   # north: 15s shelter → ~20s between city msgs in same salvo
-    pre_alert    = @{ n=20;  o=120 }
-    ballistic    = @{ n=20;  o=300 }   # wide-area; north still gets 15s warning
-    uav          = @{ n=15;  o=60  }   # "go immediately" → very tight; drone passes city-by-city
+    rockets      = @{ n=15;  o=90  }
+    pre_alert    = @{ n=15;  o=120 }
+    ballistic    = @{ n=15;  o=90  }
+    uav          = @{ n=5;   o=60  }
     earthquake   = @{ n=600; o=600 }
-    infiltration = @{ n=30;  o=300 }
+    infiltration = @{ n=15;  o=300 }
     hazmat       = @{ n=600; o=600 }
     wildfire     = @{ n=600; o=600 }
     tsunami      = @{ n=600; o=600 }
 }
-$INCIDENT_GAP_DEFAULT = @{ n=20; o=90 }
+$INCIDENT_GAP_DEFAULT = @{ n=15; o=90 }
 
 $INCIDENT_MAX_DURATION = @{
-    #              north   other
-    rockets      = @{ n=45;  o=180 }   # north: 15s×cities → 3-4 cities = ~45s max; south 3 min
-    pre_alert    = @{ n=60;  o=180 }
-    ballistic    = @{ n=60;  o=300 }
-    uav          = @{ n=90;  o=240 }   # north drone pass: 90s max; south 4 min
+    rockets      = @{ n=25;  o=180 }
+    pre_alert    = @{ n=25;  o=180 }
+    ballistic    = @{ n=25;  o=300 }
+    uav          = @{ n=10;  o=240 }
     earthquake   = @{ n=900; o=900 }
-    infiltration = @{ n=120; o=600 }
+    infiltration = @{ n=30;  o=600 }
     hazmat       = @{ n=900; o=900 }
     wildfire     = @{ n=1800;o=1800}
     tsunami      = @{ n=900; o=900 }
 }
-$INCIDENT_MAX_DURATION_DEFAULT = @{ n=45; o=180 }
+$INCIDENT_MAX_DURATION_DEFAULT = @{ n=25; o=180 }
 
 function Set-IncidentIds {
     Write-Host ""
     Write-Host "=== Computing incident IDs (region-aware) ==="
 
-    # 1. Pull one row per msg_id: timestamp, type, and whether it touches קו העימות
-    $res = Invoke-D1Query @"
-SELECT msg_id, MIN(alert_ts) AS first_ts, alert_type,
-       MAX(CASE WHEN region = 'אזור קו העימות' THEN 1 ELSE 0 END) AS is_north
-FROM tg_alerts
-WHERE alert_type NOT IN ('all_clear','unknown')
-GROUP BY msg_id
-ORDER BY alert_type, first_ts
-"@
+    # Step 1a: north msg_ids — LIKE query, Hebrew built at runtime to avoid encoding issues
+    $likeP = "%" + $KAV_IMUT + "%"
+    $northRes = Invoke-D1Query ("SELECT DISTINCT msg_id FROM tg_alerts WHERE region LIKE '" + $likeP + "'")
+    $northSet = [System.Collections.Generic.HashSet[long]]::new()
+    @($northRes[0].results) | ForEach-Object { [void]$northSet.Add([long]$_.msg_id) }
+    Write-Host ("  North msg_ids: " + $northSet.Count)
+
+    # Step 1b: all siren events
+    $res     = Invoke-D1Query "SELECT msg_id, MIN(alert_ts) AS first_ts, alert_type FROM tg_alerts WHERE alert_type NOT IN ('all_clear','unknown') GROUP BY msg_id ORDER BY alert_type, first_ts"
     $msgRows = @($res[0].results) | Sort-Object alert_type, first_ts
+    Write-Host ("  Events: " + $msgRows.Count)
 
-    Write-Host "  $($msgRows.Count) siren events to cluster..."
-
-    # 2. Assign incident IDs — state keyed by "$alert_type|$tier" so north/south track independently
-    $assignments  = @{}   # msg_id  → incident_id string
-    $lastTs       = @{}   # key     → last [datetime]
-    $incStart     = @{}   # key     → first_ts string of current incident
-    $incStartDt   = @{}   # key     → [datetime] of current incident start
+    # Step 2: cluster
+    $assignments = @{}
+    $lastTs      = @{}
+    $incStart    = @{}
+    $incStartDt  = @{}
 
     foreach ($row in $msgRows) {
         $at   = $row.alert_type
         $ts   = [datetime]$row.first_ts
-        $tier = if ($row.is_north -eq 1) { 'n' } else { 'o' }
-        $key  = "$at|$tier"
+        $tier = if ($northSet.Contains([long]$row.msg_id)) { "n" } else { "o" }
+        $key  = $at + "|" + $tier
 
-        $gapMap = if ($INCIDENT_GAP.ContainsKey($at))          { $INCIDENT_GAP[$at] }          else { $INCIDENT_GAP_DEFAULT }
-        $durMap = if ($INCIDENT_MAX_DURATION.ContainsKey($at)) { $INCIDENT_MAX_DURATION[$at] } else { $INCIDENT_MAX_DURATION_DEFAULT }
-        $gap    = $gapMap[$tier]
-        $maxDur = $durMap[$tier]
+        $g = if ($INCIDENT_GAP.ContainsKey($at)) { $INCIDENT_GAP[$at][$tier] } else { $INCIDENT_GAP_DEFAULT[$tier] }
+        $m = if ($INCIDENT_MAX_DURATION.ContainsKey($at)) { $INCIDENT_MAX_DURATION[$at][$tier] } else { $INCIDENT_MAX_DURATION_DEFAULT[$tier] }
 
-        $newIncident = (
+        $newInc = (
             -not $lastTs.ContainsKey($key) -or
-            ($ts - $lastTs[$key]).TotalSeconds       -gt $gap -or
-            ($incStartDt.ContainsKey($key) -and ($ts - $incStartDt[$key]).TotalSeconds -gt $maxDur)
+            ($ts - $lastTs[$key]).TotalSeconds -gt $g -or
+            ($incStartDt.ContainsKey($key) -and ($ts - $incStartDt[$key]).TotalSeconds -gt $m)
         )
 
-        if ($newIncident) {
-            $incStart[$key]   = $row.first_ts
-            $incStartDt[$key] = $ts
-        }
+        if ($newInc) { $incStart[$key] = $row.first_ts; $incStartDt[$key] = $ts }
         $lastTs[$key] = $ts
-        # Include tier in incident_id so north/south incidents with same timestamp never collide
-        $assignments[$row.msg_id] = "$at|$tier|$($incStart[$key])"
+        $assignments[$row.msg_id] = $at + "|" + $tier + "|" + $incStart[$key]
     }
 
-    $uniqueIncidents = ($assignments.Values | Sort-Object -Unique).Count
-    Write-Host "  → $uniqueIncidents unique incidents across $($assignments.Count) events"
+    $unique = ($assignments.Values | Sort-Object -Unique).Count
+    Write-Host ("  -> " + $unique + " unique incidents across " + $assignments.Count + " events")
 
-    # 3. Batch UPDATE using CASE WHEN, 200 msg_ids per query
+    # Step 3: batch UPDATE
     $allMsgIds = @($assignments.Keys)
     [int]$total = $allMsgIds.Count
     [int]$chunk = 200
-    [int]$i     = 0
-    [int]$done  = 0
+    [int]$i = 0; [int]$done = 0
 
     while ($i -lt $total) {
-        [int]$end  = [Math]::Min($i + $chunk - 1, $total - 1)
+        [int]$end = [Math]::Min($i + $chunk - 1, $total - 1)
         $slice = $allMsgIds[$i..$end]
-
-        $cases  = ($slice | ForEach-Object { "WHEN $_ THEN '$(($assignments[$_] -replace "'","''"))'" }) -join " "
+        $cases = ($slice | ForEach-Object {
+            $safeId = $assignments[$_] -replace "'", "''"
+            "WHEN " + $_ + " THEN '" + $safeId + "'"
+        }) -join " "
         $inList = $slice -join ","
-        $sql    = "UPDATE tg_alerts SET incident_id = CASE msg_id $cases ELSE incident_id END WHERE msg_id IN ($inList)"
-
+        $sql = "UPDATE tg_alerts SET incident_id = CASE msg_id " + $cases + " ELSE incident_id END WHERE msg_id IN (" + $inList + ")"
         try { Invoke-D1Query $sql | Out-Null }
-        catch { Write-Warning "  Update failed at msg batch $i`: $_" }
-
+        catch { Write-Warning ("Batch " + $i + " failed: " + $_) }
         $done += $slice.Count
-        if ($done % 1000 -eq 0 -or $done -eq $total) {
-            Write-Host "  ...processed $done / $total msg_ids"
-        }
+        if ($done % 1000 -eq 0 -or $done -eq $total) { Write-Host ("  ..." + $done + "/" + $total) }
         $i += $chunk
         Start-Sleep -Milliseconds 150
     }
 
     Write-Host "  incident_id populated."
     Write-Host ""
+}
+
 }
 
 # ---- Main --------------------------------------------------------------------
