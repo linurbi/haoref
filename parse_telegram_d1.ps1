@@ -11,7 +11,7 @@
 #   title TEXT          -- section header from the message
 #   city TEXT           -- city name (empty for all-clears)
 #   region TEXT         -- zone/area name
-#   category INTEGER    -- numeric (1=rockets 2=uav 3=ballistic 4=pre_alert 5=all_clear ...)
+#   category INTEGER    -- official Pikud HaOref category ID (1=missilealert 2=uav 7=earthquake 10=terrorattack 11=tsunami 12=hazmat 13=update/all_clear 14=flash/pre_alert)
 #
 # COUNT(DISTINCT msg_id) = unique siren activations (not city-hits, not rockets)
 # Use alert_type filter to separate rockets / UAV / ballistic etc.
@@ -72,18 +72,19 @@ function Get-AlertType([string]$t) {
 }
 
 function Get-Category([string]$alertType) {
+    # Official Pikud HaOref category IDs
     switch ($alertType) {
-        "rockets"      { return 1 }
-        "uav"          { return 2 }
-        "ballistic"    { return 3 }
-        "pre_alert"    { return 4 }
-        "all_clear"    { return 5 }
-        "earthquake"   { return 6 }
-        "infiltration" { return 7 }
-        "hazmat"       { return 8 }
-        "wildfire"     { return 9 }
-        "tsunami"      { return 10 }
-        default        { return 0 }
+        "rockets"      { return 1  }   # missilealert
+        "ballistic"    { return 1  }   # missilealert (ballistic = high-trajectory missile)
+        "uav"          { return 2  }   # uav
+        "earthquake"   { return 7  }   # earthquakealert1
+        "tsunami"      { return 11 }   # tsunami
+        "hazmat"       { return 12 }   # hazmat
+        "all_clear"    { return 13 }   # update
+        "pre_alert"    { return 14 }   # flash
+        "infiltration" { return 10 }   # terrorattack
+        "wildfire"     { return 4  }   # warning
+        default        { return 0  }
     }
 }
 
