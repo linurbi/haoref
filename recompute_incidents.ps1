@@ -1,13 +1,18 @@
-﻿# recompute_incidents.ps1
+# recompute_incidents.ps1
 # Rewrites incident_id for ALL rows using region-aware thresholds.
 # No Hebrew literals in source — constructed via Unicode code points to avoid encoding issues.
 #
 # tier n = confrontation-line north (15s shelter / UAV go-immediately)
 # tier o = rest of Israel (90s shelter)
 
+# Load local secrets if present (never committed — see secrets.local.ps1.example)
+$_localSecrets = Join-Path $PSScriptRoot "secrets.local.ps1"
+if (Test-Path $_localSecrets) { . $_localSecrets }
+
 $CF_ACCOUNT_ID  = if ($env:CF_ACCOUNT_ID)  { $env:CF_ACCOUNT_ID }  else { "913dd7d67a19b98eb74cab6d8e8e0b4a" }
-$CF_API_TOKEN   = if ($env:CF_API_TOKEN)   { $env:CF_API_TOKEN }   else { "cfat_vec9LvsRcJtkxrx5p15DkZbWiMdW53U9jp2bj9b8e52ce9e2" }
 $D1_DATABASE_ID = if ($env:D1_DATABASE_ID) { $env:D1_DATABASE_ID } else { "ac645c9a-e7cc-4eb1-a0b1-17fe4cc437e5" }
+$CF_API_TOKEN   = $env:CF_API_TOKEN
+if (-not $CF_API_TOKEN) { throw "CF_API_TOKEN env var is not set. Copy secrets.local.ps1.example to secrets.local.ps1 and fill it in." }
 $D1_URL = "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/d1/database/$D1_DATABASE_ID"
 $CF_HEADERS = @{ Authorization = "Bearer $CF_API_TOKEN"; "Content-Type" = "application/json" }
 

@@ -19,11 +19,14 @@
 # Run:  powershell -ExecutionPolicy Bypass -File .\parse_telegram_d1.ps1
 
 # ---- CONFIG ------------------------------------------------------------------
-# Credentials: prefer environment variables (GitHub Actions secrets),
-# fall back to hardcoded values for local runs.
+# Load local secrets if present (never committed — see secrets.local.ps1.example)
+$_localSecrets = Join-Path $PSScriptRoot "secrets.local.ps1"
+if (Test-Path $_localSecrets) { . $_localSecrets }
+
 $CF_ACCOUNT_ID  = if ($env:CF_ACCOUNT_ID)  { $env:CF_ACCOUNT_ID }  else { "913dd7d67a19b98eb74cab6d8e8e0b4a" }
-$CF_API_TOKEN   = if ($env:CF_API_TOKEN)   { $env:CF_API_TOKEN }   else { "cfat_vec9LvsRcJtkxrx5p15DkZbWiMdW53U9jp2bj9b8e52ce9e2" }
 $D1_DATABASE_ID = if ($env:D1_DATABASE_ID) { $env:D1_DATABASE_ID } else { "ac645c9a-e7cc-4eb1-a0b1-17fe4cc437e5" }
+$CF_API_TOKEN   = $env:CF_API_TOKEN
+if (-not $CF_API_TOKEN) { throw "CF_API_TOKEN env var is not set. Copy secrets.local.ps1.example to secrets.local.ps1 and fill it in." }
 $CHANNEL        = "PikudHaOref_all"
 $OP_START       = [datetime]"2026-02-28"
 # ------------------------------------------------------------------------------

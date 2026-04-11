@@ -1,7 +1,7 @@
-# Scripts containing real credentials — never commit these
-load_history.ps1
-parse_telegram_d1.ps1
-load_history.py
+# Local secrets — never commit
+secrets.local.ps1
 
-# HAR files may contain session tokens
+# Temp files
+_d1tmp.txt
+_*.json
 *.har
