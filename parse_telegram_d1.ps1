@@ -1,4 +1,4 @@
-﻿# parse_telegram_d1.ps1
+# parse_telegram_d1.ps1
 # Scrapes https://t.me/s/PikudHaOref_all (public web view, no credentials needed)
 # Parses every alert message and bulk-inserts into Cloudflare D1.
 #
@@ -240,8 +240,6 @@ function Set-IncidentIds {
 
     Write-Host "  incident_id populated."
     Write-Host ""
-}
-
 }
 
 # ---- Main --------------------------------------------------------------------
