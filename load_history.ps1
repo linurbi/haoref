@@ -89,7 +89,7 @@ while ($winStart -lt $winEnd) {
 
     $s = $winStart.ToString("yyyy-MM-ddTHH:mm:ssZ")
     $e = $winStop.ToString("yyyy-MM-ddTHH:mm:ssZ")
-    $uri = "$REDALERT_BASE/api/stats/summary?startDate=$([Uri]::EscapeDataString($s))&endDate=$([Uri]::EscapeDataString($e))&include=topCities&topLimit=50"
+    $uri = "$REDALERT_BASE/stats/summary?startDate=$([Uri]::EscapeDataString($s))&endDate=$([Uri]::EscapeDataString($e))&include=topCities&topLimit=50"
 
     try {
         $data = Invoke-RestMethod -Uri $uri -Headers $RA_HEADERS -Method Get
@@ -130,7 +130,7 @@ do {
     Write-Host "  Fetching offset=$offset ..." -NoNewline
 
     $params = "startDate=$([Uri]::EscapeDataString($startDate))&limit=$pageSize&offset=$offset&order=asc"
-    $page   = Invoke-RestMethod -Uri "$REDALERT_BASE/api/stats/history?$params" `
+    $page   = Invoke-RestMethod -Uri "$REDALERT_BASE/stats/history?$params" `
                 -Headers $RA_HEADERS -Method Get
 
     $alerts  = $page.data
