@@ -1,4 +1,4 @@
-# load_history.ps1 — Bulk-load RedAlert history into Cloudflare D1
+# load_history.ps1 — Bulk-load Siren (api.siren.co.il) history into Cloudflare D1
 # Stores (alert_id, zone) pairs — deduped via city→zone lookup from topCities.
 # Resulting tables:
 #   alerts       — one row per alarm event  (id, ts, type, origin)
@@ -20,7 +20,7 @@ if (-not $REDALERT_KEY)  { throw "REDALERT_KEY env var not set. See secrets.loca
 $OP_START       = "2026-02-28T00:00:00Z"
 # ──────────────────────────────────────────────────────────────────────────────
 
-$REDALERT_BASE = "https://redalert.orielhaim.com"
+$REDALERT_BASE = "https://api.siren.co.il"
 $D1_URL        = "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/d1/database/$D1_DATABASE_ID"
 
 $RA_HEADERS = @{ Authorization = "Bearer $REDALERT_KEY"; Accept = "application/json" }
