@@ -80,6 +80,7 @@
     </div>
     <div class="update-timer">
       עדכון בעוד <span id="countdown">60</span> שניות
+      <button id="pauseBtn" onclick="togglePause()" title="השהה רענון אוטומטי">⏸</button>
     </div>
   </div>
 </header>
@@ -1124,7 +1125,26 @@ function setLoadingState(on) {
 // ═══════════════════════════════════════════════
 // COUNTDOWN
 // ═══════════════════════════════════════════════
+let _paused = false;
+
+function togglePause() {
+  _paused = !_paused;
+  const btn = document.getElementById("pauseBtn");
+  if (_paused) {
+    clearInterval(countdownInterval);
+    btn.textContent = "▶";
+    btn.title = "המשך רענון אוטומטי";
+    btn.classList.add("paused");
+  } else {
+    btn.textContent = "⏸";
+    btn.title = "השהה רענון אוטומטי";
+    btn.classList.remove("paused");
+    resetCountdown();
+  }
+}
+
 function resetCountdown() {
+  if (_paused) return;
   countdown = UPDATE_EVERY;
   clearInterval(countdownInterval);
   countdownInterval = setInterval(() => {

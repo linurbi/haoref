@@ -140,8 +140,11 @@ header::after {
   50%      { opacity:0.1; transform:scale(0.5); }
 }
 
-.update-timer { font-size:11px; color:var(--text-faint); direction:ltr; }
+.update-timer { font-size:11px; color:var(--text-faint); direction:ltr; display:flex; align-items:center; gap:6px; }
 .update-timer span { color:var(--c2); font-weight:700; }
+.update-timer button { background:none; border:1px solid var(--border); border-radius:4px; color:var(--text-faint); cursor:pointer; font-size:11px; padding:1px 5px; line-height:1.4; }
+.update-timer button:hover { border-color:var(--c2); color:var(--c2); }
+.update-timer button.paused { border-color:var(--red); color:var(--red); }
 
 /* ════════════════════════ MAIN ════════════════════════ */
 main { padding:28px 40px; max-width:1640px; margin:0 auto; }
